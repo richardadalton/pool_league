@@ -41,20 +41,18 @@ function render(d, league) {
       holder: playerLink(d.longestWinStreak.playerId, d.longestWinStreak.playerName, league)
     },
     {
-      icon: '📉',
-      title: 'Longest Losing Streak',
-      value: d.longestLossStreak.value
-        ? `${d.longestLossStreak.value} Loss${d.longestLossStreak.value !== 1 ? 'es' : ''}`
-        : '—',
-      valueClass: 'red',
-      holder: playerLink(d.longestLossStreak.playerId, d.longestLossStreak.playerName, league)
-    },
-    {
       icon: '🎱',
       title: 'Most Games Played',
       value: d.mostGamesPlayed.value ? `${d.mostGamesPlayed.value} Games` : '—',
       valueClass: 'accent',
       holder: playerLink(d.mostGamesPlayed.playerId, d.mostGamesPlayed.playerName, league)
+    },
+    {
+      icon: '🏆',
+      title: 'Most Games Won',
+      value: d.mostGamesWon.value ? `${d.mostGamesWon.value} Wins` : '—',
+      valueClass: 'green',
+      holder: playerLink(d.mostGamesWon.playerId, d.mostGamesWon.playerName, league)
     },
     {
       icon: '⭐',

@@ -53,6 +53,118 @@ function calcElo(winnerRating, loserRating) {
   };
 }
 
+// ── Badges ────────────────────────────────────────────────────────────────────
+
+const BADGE_DEFS = [
+  {
+    id: 'first_win',
+    name: 'First Win',
+    icon: '🥇',
+    desc: 'Win your first game'
+  },
+  {
+    id: 'games_10',
+    name: 'Veteran',
+    icon: '🎮',
+    desc: 'Play 10 games'
+  },
+  {
+    id: 'games_50',
+    name: 'Seasoned',
+    icon: '🏅',
+    desc: 'Play 50 games'
+  },
+  {
+    id: 'games_100',
+    name: 'Centurion',
+    icon: '💯',
+    desc: 'Play 100 games'
+  },
+  {
+    id: 'beat_top',
+    name: 'Giant Killer',
+    icon: '🗡️',
+    desc: 'Beat the top rated player'
+  },
+  {
+    id: 'achieve_record',
+    name: 'Record Holder',
+    icon: '📈',
+    desc: 'Hold at least one all-time record'
+  },
+  {
+    id: 'all_records',
+    name: 'Grand Slam',
+    icon: '👑',
+    desc: 'Hold all four records simultaneously'
+  }
+];
+
+function computeBadges(player, games, db) {
+  const earned = new Set();
+  const played = player.wins + player.losses;
+
+  if (player.wins >= 1)   earned.add('first_win');
+  if (played >= 10)       earned.add('games_10');
+  if (played >= 50)       earned.add('games_50');
+  if (played >= 100)      earned.add('games_100');
+
+  // Beat the top rated player — did this player ever beat whoever was rated
+  // highest at the time of that game (winnerRatingBefore comparison)?
+  games.forEach(g => {
+    if (g.winnerId !== player.id) return;
+    // The loser's rating before the game
+    const loserBefore = g.loserRatingBefore;
+    // Was the loser top-rated? Check if any other player had a higher rating
+    // at that moment — approximate by checking if loserBefore was the highest
+    // among all players' ratings before this game. We use the stored
+    // winnerRatingBefore too.
+    const allBefore = db.games
+      .filter(og => og.playedAt < g.playedAt)
+      .reduce((acc, og) => {
+        acc[og.winnerId] = og.winnerRatingAfter;
+        acc[og.loserId]  = og.loserRatingAfter;
+        return acc;
+      }, {});
+    // Fill in starting ratings for anyone not yet seen
+    db.players.forEach(p => { if (!(p.id in allBefore)) allBefore[p.id] = 1000; });
+    const maxRating = Math.max(...Object.values(allBefore));
+    if (loserBefore >= maxRating) earned.add('beat_top');
+  });
+
+  // Records — compute all four and check if player holds any / all
+  const records = { longestWinStreak: 0, mostGamesPlayed: 0, mostGamesWon: 0, highestEloRating: 0 };
+  const holders = { longestWinStreak: null, mostGamesPlayed: null, mostGamesWon: null, highestEloRating: null };
+
+  for (const p of db.players) {
+    const pg = db.games.filter(g => g.winnerId === p.id || g.loserId === p.id);
+    const pp = p.wins + p.losses;
+    if (pp > records.mostGamesPlayed) { records.mostGamesPlayed = pp; holders.mostGamesPlayed = p.id; }
+    if (p.wins > records.mostGamesWon) { records.mostGamesWon = p.wins; holders.mostGamesWon = p.id; }
+
+    let high = 1000;
+    pg.forEach(g => {
+      const r = g.winnerId === p.id ? g.winnerRatingAfter : g.loserRatingAfter;
+      if (r > high) high = r;
+    });
+    if (high > records.highestEloRating) { records.highestEloRating = high; holders.highestEloRating = p.id; }
+
+    let cw = 0, cl = 0, bw = 0, bl = 0;
+    pg.forEach(g => {
+      if (g.winnerId === p.id) { cw++; cl = 0; if (cw > bw) bw = cw; }
+      else                     { cl++; cw = 0; if (cl > bl) bl = cl; }
+    });
+    if (bw > records.longestWinStreak)  { records.longestWinStreak  = bw; holders.longestWinStreak  = p.id; }
+  }
+
+  const holdsAny = Object.values(holders).some(id => id === player.id);
+  const holdsAll = Object.values(holders).every(id => id === player.id);
+  if (holdsAny) earned.add('achieve_record');
+  if (holdsAll) earned.add('all_records');
+
+  return BADGE_DEFS.map(b => ({ ...b, earned: earned.has(b.id) }));
+}
+
 // ── Middleware ────────────────────────────────────────────────────────────────
 
 app.use(express.json());
@@ -164,7 +276,8 @@ app.get('/api/players/:id/profile', (req, res) => {
     wins: player.wins, losses: player.losses, played: total,
     winPct: total ? Math.round((player.wins / total) * 100) : 0,
     results: allResults, longestWinStreak: longestWin, longestLossStreak: longestLoss,
-    currentStreak, highestRating: high, lowestRating: low, eloHistory
+    currentStreak, highestRating: high, lowestRating: low, eloHistory,
+    badges: computeBadges(player, games, db)
   });
 });
 
@@ -175,8 +288,8 @@ app.get('/api/records', (req, res) => {
 
   const records = {
     longestWinStreak:  { value: 0, playerId: null, playerName: null },
-    longestLossStreak: { value: 0, playerId: null, playerName: null },
     mostGamesPlayed:   { value: 0, playerId: null, playerName: null },
+    mostGamesWon:      { value: 0, playerId: null, playerName: null },
     highestEloRating:  { value: 0, playerId: null, playerName: null }
   };
 
@@ -185,6 +298,9 @@ app.get('/api/records', (req, res) => {
     const played = player.wins + player.losses;
     if (played > records.mostGamesPlayed.value)
       records.mostGamesPlayed = { value: played, playerId: player.id, playerName: player.name };
+
+    if (player.wins > records.mostGamesWon.value)
+      records.mostGamesWon = { value: player.wins, playerId: player.id, playerName: player.name };
 
     let high = 1000;
     games.forEach(g => {
@@ -201,8 +317,6 @@ app.get('/api/records', (req, res) => {
     });
     if (bestWin  > records.longestWinStreak.value)
       records.longestWinStreak  = { value: bestWin,  playerId: player.id, playerName: player.name };
-    if (bestLoss > records.longestLossStreak.value)
-      records.longestLossStreak = { value: bestLoss, playerId: player.id, playerName: player.name };
   }
 
   res.json(records);

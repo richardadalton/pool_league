@@ -17,8 +17,8 @@ A local multiplayer league tracker with **ELO ratings**, player profiles, game h
   - ELO rating history chart
 - **Records page** — all-time bests for the active league:
   - Longest winning streak
-  - Longest losing streak
   - Most games played
+  - Most games won
   - Highest ever ELO rating
 - **Game history** — full log of all recorded results
 - **Network accessible** — accessible from any device on the same Wi-Fi

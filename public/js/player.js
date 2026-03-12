@@ -68,6 +68,13 @@ function renderProfile(p, league) {
       }).join('')
     : '<span style="color:var(--muted);font-size:0.85rem">No games yet</span>';
 
+  // Badges
+  const badgesHtml = p.badges.map(b => `
+    <div class="badge-item${b.earned ? ' earned' : ' locked'}" title="${esc(b.desc)}">
+      <span class="badge-icon">${b.earned ? b.icon : '🔒'}</span>
+      <span class="badge-name">${esc(b.name)}</span>
+    </div>`).join('');
+
   document.getElementById('root').innerHTML = `
     <!-- Hero -->
     <div class="hero">
@@ -80,6 +87,12 @@ function renderProfile(p, league) {
         <div class="rating-value">${p.rating}</div>
         <div class="rating-label">ELO Rating</div>
       </div>
+    </div>
+
+    <!-- Badges -->
+    <div class="card" style="margin-bottom:20px">
+      <h3>Badges</h3>
+      <div class="badges-row">${badgesHtml}</div>
     </div>
 
     <!-- Stats grid -->
