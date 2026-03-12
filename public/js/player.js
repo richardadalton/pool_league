@@ -81,11 +81,11 @@ function renderProfile(p, league) {
       <div class="hero-avatar">${esc(initial)}</div>
       <div class="hero-info">
         <div class="hero-name">${esc(p.name)}</div>
+        <div class="hero-rating">
+          <span class="rating-value">${p.rating}</span>
+          <span class="rating-label">ELO Rating</span>
+        </div>
         <div class="hero-position">${ordinal(p.position)} of ${p.totalPlayers} players</div>
-      </div>
-      <div class="hero-rating">
-        <div class="rating-value">${p.rating}</div>
-        <div class="rating-label">ELO Rating</div>
       </div>
     </div>
 
