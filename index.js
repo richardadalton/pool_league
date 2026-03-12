@@ -309,36 +309,41 @@ app.get('/api/records', (req, res) => {
   const db = getDb(league);
 
   const records = {
-    longestWinStreak:  { value: 0, playerId: null, playerName: null },
-    mostGamesPlayed:   { value: 0, playerId: null, playerName: null },
-    mostGamesWon:      { value: 0, playerId: null, playerName: null },
-    highestEloRating:  { value: 0, playerId: null, playerName: null }
+    longestWinStreak: { value: 0, holders: [] },
+    mostGamesPlayed:  { value: 0, holders: [] },
+    mostGamesWon:     { value: 0, holders: [] },
+    highestEloRating: { value: 0, holders: [] }
   };
+
+  function addHolder(record, value, player) {
+    if (value > record.value) {
+      record.value   = value;
+      record.holders = [{ id: player.id, name: player.name }];
+    } else if (value === record.value && value > 0) {
+      record.holders.push({ id: player.id, name: player.name });
+    }
+  }
 
   for (const player of db.players) {
     const games = db.games.filter(g => g.winnerId === player.id || g.loserId === player.id);
     const played = player.wins + player.losses;
-    if (played > records.mostGamesPlayed.value)
-      records.mostGamesPlayed = { value: played, playerId: player.id, playerName: player.name };
 
-    if (player.wins > records.mostGamesWon.value)
-      records.mostGamesWon = { value: player.wins, playerId: player.id, playerName: player.name };
+    addHolder(records.mostGamesPlayed, played, player);
+    addHolder(records.mostGamesWon, player.wins, player);
 
     let high = 1000;
     games.forEach(g => {
       const r = g.winnerId === player.id ? g.winnerRatingAfter : g.loserRatingAfter;
       if (r > high) high = r;
     });
-    if (high > records.highestEloRating.value)
-      records.highestEloRating = { value: high, playerId: player.id, playerName: player.name };
+    addHolder(records.highestEloRating, high, player);
 
-    let curWin = 0, curLoss = 0, bestWin = 0, bestLoss = 0;
+    let curWin = 0, bestWin = 0;
     games.forEach(g => {
-      if (g.winnerId === player.id) { curWin++; curLoss = 0; if (curWin > bestWin) bestWin = curWin; }
-      else                          { curLoss++; curWin = 0; if (curLoss > bestLoss) bestLoss = curLoss; }
+      if (g.winnerId === player.id) { curWin++; if (curWin > bestWin) bestWin = curWin; }
+      else                          { curWin = 0; }
     });
-    if (bestWin  > records.longestWinStreak.value)
-      records.longestWinStreak  = { value: bestWin,  playerId: player.id, playerName: player.name };
+    addHolder(records.longestWinStreak, bestWin, player);
   }
 
   res.json(records);

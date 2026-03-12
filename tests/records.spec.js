@@ -92,7 +92,9 @@ test.describe('Records Page — Content', () => {
 
   test('clicking record holder link navigates to player profile', async ({ page }) => {
     await gotoRecords(page);
-    const link = page.locator('.record-card .player-link', { hasText: 'Alice' }).first();
+    // Alice is the sole holder of Longest Winning Streak — click her link there
+    const card = page.locator('.record-card', { hasText: 'Longest Winning Streak' });
+    const link = card.locator('.player-link', { hasText: 'Alice' });
     await link.click();
     await page.waitForSelector('.hero', { timeout: 10_000 });
     await expect(page.locator('.hero-name')).toContainText('Alice');

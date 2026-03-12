@@ -134,12 +134,12 @@ A badges/achievements system was designed and implemented to reward player miles
 | File | Tests | What it covers |
 |------|-------|----------------|
 | `tests/helpers.js` | — | Shared utilities: `createTestLeague`, `addPlayer`, `recordGame` |
-| `tests/api.spec.js` | 43 | All API endpoints — Leagues, Players, Games, Profile, Records, ELO maths, King of the Hill, Badges |
+| `tests/api.spec.js` | 44 | All API endpoints — Leagues, Players, Games, Profile, Records, ELO maths, King of the Hill, Badges |
 | `tests/home.spec.js` | 20 | Home page UI — league table, add player form, record game form, game history, league switcher |
 | `tests/player.spec.js` | 20 | Player profile UI — hero section, stats grid, badges, streaks, results history, ELO chart, 404 handling |
 | `tests/records.spec.js` | 14 | Records page UI — layout, all 4 record cards, player links, empty state |
 
-**Total: 97 tests, all passing.**
+**Total: 98 tests, all passing.**
 
 #### npm scripts added
 
@@ -151,7 +151,24 @@ npm run test:report # view HTML report after a run
 
 ---
 
-### 10. README Updates
+### 10. Records Page — Tied Record Holders
+
+- **Change:** The records API previously tracked only a single holder per record (`playerId` / `playerName`). Updated to return a `holders` array (`[{ id, name }]`) so that all players who share a record value are listed.
+- **Backend:** A shared `addHolder()` helper resets the array when a new high value is found, and appends to it on an exact tie.
+- **Frontend:** `playerLink()` replaced with `playerLinks()`, which maps the array to comma-separated profile links rendered inside the record card.
+- **CSS:** `.record-holder` updated to `flex-wrap` so multiple names wrap neatly; `.holder-sep` styles the comma separators.
+- **Tests:** API test suite updated to assert the `holders` array shape and added a test confirming both tied players appear when they share the `mostGamesPlayed` record (98 tests total).
+
+---
+
+### 11. Records Page — Comma Spacing Between Tied Names
+
+- **Issue:** When multiple holders were listed, names were separated by `,` with no space, making them hard to read.
+- **Fix:** Changed the separator from `', '` to `',&nbsp;'` (non-breaking space) so names are clearly spaced regardless of how the browser collapses whitespace inside inline HTML.
+
+---
+
+### 12. README Updates
 
 The `README.md` was updated multiple times throughout development to reflect:
 - The multi-league architecture
@@ -162,6 +179,8 @@ The `README.md` was updated multiple times throughout development to reflect:
 - Data storage approach
 - Project structure (including test files)
 - Testing section with commands and coverage table
+- Tied record holders feature
+- Comma spacing between tied names
 
 ---
 
@@ -173,7 +192,7 @@ The `README.md` was updated multiple times throughout development to reflect:
 | Frontend | Vanilla HTML, CSS, JavaScript |
 | Data storage | JSON files (one per league, in `data/`) |
 | Charts | Chart.js (ELO history chart on profile page) |
-| Testing | Playwright (API + UI, 97 tests) |
+| Testing | Playwright (API + UI, 98 tests) |
 | Version control | Git + GitHub |
 
 ---

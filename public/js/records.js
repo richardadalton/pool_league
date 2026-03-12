@@ -24,9 +24,11 @@ async function load() {
   }
 }
 
-function playerLink(id, name, league) {
-  if (!id) return '<span class="no-record">No games yet</span>';
-  return `<a class="player-link" href="/player.html?id=${esc(id)}&league=${esc(league)}">${esc(name)}</a>`;
+function playerLinks(holders, league) {
+  if (!holders || holders.length === 0) return '<span class="no-record">No games yet</span>';
+  return holders
+    .map(h => `<a class="player-link" href="/player.html?id=${esc(h.id)}&league=${esc(league)}">${esc(h.name)}</a>`)
+    .join('<span class="holder-sep">,&nbsp;</span>');
 }
 
 function render(d, league) {
@@ -38,28 +40,28 @@ function render(d, league) {
         ? `${d.longestWinStreak.value} Win${d.longestWinStreak.value !== 1 ? 's' : ''}`
         : '—',
       valueClass: 'green',
-      holder: playerLink(d.longestWinStreak.playerId, d.longestWinStreak.playerName, league)
+      holder: playerLinks(d.longestWinStreak.holders, league)
     },
     {
       icon: '🎱',
       title: 'Most Games Played',
       value: d.mostGamesPlayed.value ? `${d.mostGamesPlayed.value} Games` : '—',
       valueClass: 'accent',
-      holder: playerLink(d.mostGamesPlayed.playerId, d.mostGamesPlayed.playerName, league)
+      holder: playerLinks(d.mostGamesPlayed.holders, league)
     },
     {
       icon: '🏆',
       title: 'Most Games Won',
       value: d.mostGamesWon.value ? `${d.mostGamesWon.value} Wins` : '—',
       valueClass: 'green',
-      holder: playerLink(d.mostGamesWon.playerId, d.mostGamesWon.playerName, league)
+      holder: playerLinks(d.mostGamesWon.holders, league)
     },
     {
       icon: '⭐',
       title: 'Highest Ever ELO',
       value: d.highestEloRating.value ? d.highestEloRating.value : '—',
       valueClass: 'accent',
-      holder: playerLink(d.highestEloRating.playerId, d.highestEloRating.playerName, league)
+      holder: playerLinks(d.highestEloRating.holders, league)
     }
   ];
 

@@ -22,7 +22,7 @@ A local multiplayer league tracker with **ELO ratings**, player profiles, game h
   - 🏆 Grand Slam (hold all records simultaneously)
   - 👑 King of the Hill (win the first game, or beat the reigning king)
 - **King of the Hill** — a special title awarded to the winner of the first ever game; transfers to any player who beats the current holder
-- **Records page** — all-time bests for the active league:
+- **Records page** — all-time bests for the active league; when players are tied, all names are shown:
   - Longest winning streak
   - Most games played
   - Most games won
@@ -130,11 +130,11 @@ npm run test:ui
 npm run test:report
 ```
 
-### What's covered (97 tests)
+### What's covered (98 tests)
 
 | Suite | Tests | Covers |
 |-------|-------|--------|
-| `api.spec.js` | 43 | Leagues, Players, Games, Profile, Records, ELO maths, King of the Hill, Badges |
+| `api.spec.js` | 44 | Leagues, Players, Games, Profile, Records, ELO maths, King of the Hill, Badges |
 | `home.spec.js` | 20 | League table, Add player, Record game, Game history, League switcher |
 | `player.spec.js` | 20 | Hero section, Stats grid, Badges, Streaks, Results history, ELO chart, 404 |
 | `records.spec.js` | 14 | Layout, All 4 record cards, Holder links, Empty state |

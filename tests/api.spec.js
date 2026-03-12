@@ -328,31 +328,44 @@ test.describe('Records API', () => {
     expect(r).toHaveProperty('highestEloRating');
   });
 
+  test('each record has a holders array', async ({ request }) => {
+    const res = await request.get(`${BASE}/api/records?league=${league}`);
+    const r = await res.json();
+    for (const key of ['longestWinStreak', 'mostGamesPlayed', 'mostGamesWon', 'highestEloRating']) {
+      expect(Array.isArray(r[key].holders)).toBe(true);
+    }
+  });
+
   test('longestWinStreak record is held by Alice with value 3', async ({ request }) => {
     const res = await request.get(`${BASE}/api/records?league=${league}`);
     const r = await res.json();
     expect(r.longestWinStreak.value).toBe(3);
-    expect(r.longestWinStreak.playerName).toBe('Alice');
+    expect(r.longestWinStreak.holders).toHaveLength(1);
+    expect(r.longestWinStreak.holders[0].name).toBe('Alice');
   });
 
-  test('mostGamesPlayed record is correct', async ({ request }) => {
+  test('mostGamesPlayed record is correct and includes both tied players', async ({ request }) => {
     const res = await request.get(`${BASE}/api/records?league=${league}`);
     const r = await res.json();
-    // Bob has played 3 games (all losses), Alice has played 3 (all wins)
+    // Both Alice and Bob played 3 games — it's a tie
     expect(r.mostGamesPlayed.value).toBe(3);
+    expect(r.mostGamesPlayed.holders).toHaveLength(2);
+    const names = r.mostGamesPlayed.holders.map(h => h.name);
+    expect(names).toContain('Alice');
+    expect(names).toContain('Bob');
   });
 
   test('mostGamesWon record is held by Alice', async ({ request }) => {
     const res = await request.get(`${BASE}/api/records?league=${league}`);
     const r = await res.json();
     expect(r.mostGamesWon.value).toBe(3);
-    expect(r.mostGamesWon.playerName).toBe('Alice');
+    expect(r.mostGamesWon.holders[0].name).toBe('Alice');
   });
 
   test('highestEloRating record is held by Alice', async ({ request }) => {
     const res = await request.get(`${BASE}/api/records?league=${league}`);
     const r = await res.json();
-    expect(r.highestEloRating.playerName).toBe('Alice');
+    expect(r.highestEloRating.holders[0].name).toBe('Alice');
     expect(r.highestEloRating.value).toBeGreaterThan(1000);
   });
 
