@@ -2,6 +2,8 @@ const express = require('express');
 const fs      = require('fs');
 const path    = require('path');
 const os      = require('os');
+const multer  = require('multer');
+const sharp   = require('sharp');
 
 const app  = express();
 const PORT = process.env.TEST_PORT ? parseInt(process.env.TEST_PORT) : 3000;
@@ -39,6 +41,13 @@ function ensureLeagueDir(league) {
   if (!fs.existsSync(sd)) fs.mkdirSync(sd, { recursive: true });
   if (!fs.existsSync(playersPath(league))) fs.writeFileSync(playersPath(league), '');
   if (!fs.existsSync(gamesPath(league)))   fs.writeFileSync(gamesPath(league),   '');
+}
+
+function avatarsDir(league) {
+  return path.join(leagueDir(league), 'avatars');
+}
+function avatarPath(league, playerId) {
+  return path.join(avatarsDir(league), `${playerId}.jpg`);
 }
 
 /** Read all JSON lines from a file, skipping blank lines. */
@@ -656,6 +665,75 @@ app.delete('/api/games/:id', (req, res) => {
   coldLoad(league);
 
   res.json({ ok: true });
+});
+
+// ── Avatar routes ─────────────────────────────────────────────────────────────
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB max
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) cb(null, true);
+    else cb(new Error('Only image files are allowed'));
+  }
+});
+
+// GET /api/players/:id/avatar?league=pool — serve avatar or redirect to initials fallback
+app.get('/api/players/:id/avatar', (req, res) => {
+  const league = resolveLeague(req, res); if (!league) return;
+  const { id } = req.params;
+  const file = avatarPath(league, id);
+
+  if (fs.existsSync(file)) {
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    return fs.createReadStream(file).pipe(res);
+  }
+
+  // No avatar — send a generated SVG with the player's initials
+  const { players } = getCache(league);
+  const player = players.find(p => p.id === id);
+  const initials = player
+    ? player.name.trim().split(/\s+/).map(w => w[0].toUpperCase()).slice(0, 2).join('')
+    : '?';
+
+  const colours = ['#16a34a','#0d9488','#2563eb','#7c3aed','#c2410c','#b45309'];
+  const colour  = colours[id.charCodeAt(0) % colours.length];
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">
+    <circle cx="100" cy="100" r="100" fill="${colour}"/>
+    <text x="100" y="100" font-family="system-ui,sans-serif" font-size="80"
+          font-weight="700" fill="white" text-anchor="middle" dominant-baseline="central">${initials}</text>
+  </svg>`;
+
+  res.setHeader('Content-Type', 'image/svg+xml');
+  res.setHeader('Cache-Control', 'no-store');
+  res.send(svg);
+});
+
+// POST /api/players/:id/avatar?league=pool — upload, resize to 200×200, save as JPEG
+app.post('/api/players/:id/avatar', upload.single('avatar'), async (req, res) => {
+  const league = resolveLeague(req, res); if (!league) return;
+  const { id } = req.params;
+
+  const { players } = getCache(league);
+  if (!players.find(p => p.id === id)) return res.status(404).json({ error: 'Player not found' });
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+  try {
+    const dir = avatarsDir(league);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+    await sharp(req.file.buffer)
+      .resize(200, 200, { fit: 'cover', position: 'centre' })
+      .jpeg({ quality: 85 })
+      .toFile(avatarPath(league, id));
+
+    res.json({ avatarUrl: `/api/players/${id}/avatar?league=${league}&v=${Date.now()}` });
+  } catch (e) {
+    console.error('Avatar upload error:', e);
+    res.status(500).json({ error: 'Failed to process image' });
+  }
 });
 
 // ── Start ─────────────────────────────────────────────────────────────────────

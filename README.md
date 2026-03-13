@@ -8,7 +8,7 @@ A local multiplayer league tracker with **ELO ratings**, player profiles, game h
 
 - **Multiple leagues** — each league has its own separate data file; switch between leagues from the home page or create new ones on the fly
 - **ELO rating system** — ratings update automatically after every game
-- **League table** — players ranked by current ELO rating, with 👑 crown marking the King of the Hill and a **form guide** showing the last 5 results as green/red squares
+- **League table** — players ranked by current ELO rating, with 👑 crown marking the King of the Hill, **player avatars**, and a **form guide** showing the last 5 results as green/red squares
 - **Player profiles** — detailed stats per player including:
   - Win/loss record & win percentage
   - Current streak, longest win streak, longest loss streak
@@ -36,9 +36,9 @@ A local multiplayer league tracker with **ELO ratings**, player profiles, game h
 
 ## Tech Stack
 
-- **Backend:** Node.js with [Express](https://expressjs.com/)
+- **Backend:** Node.js with [Express](https://expressjs.com/), [multer](https://github.com/expressjs/multer) (file uploads), [sharp](https://sharp.pixelplumbing.com/) (image processing)
 - **Frontend:** Vanilla HTML, CSS, and JavaScript
-- **Data storage:** Append-only JSONL files per league in `data/<league>/`, with monthly snapshots and an in-memory cache
+- **Data storage:** Append-only JSONL files per league in `data/<league>/`, with monthly snapshots, in-memory cache, and an `avatars/` directory per league
 - **Testing:** [Playwright](https://playwright.dev/) (end-to-end API & UI tests)
 
 ---
@@ -88,6 +88,7 @@ pool_league/
 │   ├── pool/
 │   │   ├── players.jsonl  # Pool player registrations (append-only)
 │   │   ├── games.jsonl    # Pool game results (append-only)
+│   │   ├── avatars/       # Player avatar images (<playerId>.jpg)
 │   │   └── snapshots/     # Monthly derived-state snapshots
 │   └── chess/
 │       ├── players.jsonl
@@ -137,13 +138,13 @@ npm run test:ui
 npm run test:report
 ```
 
-### What's covered (132 tests)
+### What's covered (136 tests)
 
 | Suite | Tests | Covers |
 |-------|-------|--------|
-| `api.spec.js` | 62 | Leagues, Players, Games, Delete Game (tombstone), Profile, Records, ELO maths, King of the Hill, Badges, Form guide, Biggest Upset, Active Streak |
-| `home.spec.js` | 30 | League table, Form guide, Add player, Record game, Game history, Delete game UI, League switcher |
-| `player.spec.js` | 20 | Hero section, Stats grid, Badges, Streaks, Results history, ELO chart, 404 |
+| `api.spec.js` | 66 | Leagues, Players, Games, Delete Game, Profile, Records, ELO maths, King of the Hill, Badges, Form guide, Biggest Upset, Active Streak, Avatars |
+| `home.spec.js` | 30 | League table (incl. avatar column), Form guide, Add player, Record game, Game history, Delete game UI, League switcher |
+| `player.spec.js` | 20 | Hero section (incl. avatar), Stats grid, Badges, Streaks, Results history, ELO chart, 404 |
 | `records.spec.js` | 20 | Layout, All 7 record cards, Holder links, Biggest Upset, Active Streak, Empty state |
 
 ---
@@ -163,6 +164,8 @@ All game/player routes accept a `?league=` query parameter (defaults to `pool`).
 | `POST` | `/api/games?league=pool` | Record a game result `{ winnerId, loserId }` |
 | `DELETE` | `/api/games/:id?league=pool` | Delete a game `{ winnerName }` — requires winner's name as confirmation |
 | `GET` | `/api/records?league=pool` | Get all-time records for a league |
+| `GET` | `/api/players/:id/avatar?league=pool` | Get player avatar (JPEG if uploaded, SVG initials otherwise) |
+| `POST` | `/api/players/:id/avatar?league=pool` | Upload player avatar (multipart `avatar` field, max 5 MB) |
 | `POST` | `/api/admin/snapshot?league=pool` | Force a snapshot of the current derived state |
 
 ---

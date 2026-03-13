@@ -34,8 +34,8 @@ test.describe('Home Page — League Table', () => {
 
   test('players are sorted by ELO (highest first)', async ({ page }) => {
     const rows = page.locator('table tbody tr');
-    const firstRating  = await rows.nth(0).locator('td').nth(2).textContent();
-    const secondRating = await rows.nth(1).locator('td').nth(2).textContent();
+    const firstRating  = await rows.nth(0).locator('.rating-badge').textContent();
+    const secondRating = await rows.nth(1).locator('.rating-badge').textContent();
     const r1 = parseInt(firstRating.replace(/\D/g, ''), 10);
     const r2 = parseInt(secondRating.replace(/\D/g, ''), 10);
     expect(r1).toBeGreaterThanOrEqual(r2);
@@ -192,8 +192,8 @@ test.describe('Home Page — Game History', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto(`${BASE}/`);
     await page.evaluate(l => localStorage.setItem('currentLeague', l), league);
-    await page.goto(`${BASE}/`);
-    await page.waitForSelector('.game-item');
+    await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('.game-item', { timeout: 10000 });
   });
 
   test('game history shows at least one result', async ({ page }) => {

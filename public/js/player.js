@@ -41,7 +41,7 @@ function render404() {
 function renderProfile(p, league) {
   document.title = `${p.name} — Pool League`;
 
-  const initial = p.name.trim()[0].toUpperCase();
+  const avatarUrl = `/api/players/${esc(p.id)}/avatar?league=${esc(league)}`;
 
   // Current streak label
   let streakLabel = '—';
@@ -78,7 +78,11 @@ function renderProfile(p, league) {
   document.getElementById('root').innerHTML = `
     <!-- Hero -->
     <div class="hero">
-      <div class="hero-avatar">${esc(initial)}</div>
+      <label class="hero-avatar-wrap" title="Click to upload photo">
+        <img class="hero-avatar" src="${avatarUrl}" alt="${esc(p.name)}" />
+        <div class="avatar-overlay">📷</div>
+        <input type="file" accept="image/*" class="avatar-file-input" data-id="${esc(p.id)}" data-league="${esc(league)}" />
+      </label>
       <div class="hero-info">
         <div class="hero-name">${esc(p.name)}</div>
         <div class="hero-rating">
@@ -156,6 +160,32 @@ function renderProfile(p, league) {
   `;
 
   renderChart(p.eloHistory);
+
+  // Wire up avatar upload
+  document.querySelector('.avatar-file-input').addEventListener('change', async function () {
+    if (!this.files[0]) return;
+    const formData = new FormData();
+    formData.append('avatar', this.files[0]);
+    const wrap = document.querySelector('.hero-avatar-wrap');
+    wrap.classList.add('uploading');
+    try {
+      const r = await fetch(`/api/players/${this.dataset.id}/avatar?league=${this.dataset.league}`, {
+        method: 'POST', body: formData
+      });
+      if (!r.ok) throw new Error((await r.json()).error || 'Upload failed');
+      const { avatarUrl } = await r.json();
+      document.querySelector('.hero-avatar').src = avatarUrl;
+      // Also refresh league table avatars if any
+      document.querySelectorAll(`.league-avatar[data-id="${this.dataset.id}"]`).forEach(img => {
+        img.src = avatarUrl;
+      });
+    } catch (e) {
+      alert('Upload failed: ' + e.message);
+    } finally {
+      wrap.classList.remove('uploading');
+      this.value = '';
+    }
+  });
 }
 
 // ── Chart ─────────────────────────────────────────────────────────────────────

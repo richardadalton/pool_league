@@ -114,9 +114,11 @@ async function loadLeague() {
     const formHtml = (p.form && p.form.length)
       ? p.form.map(r => `<span class="form-sq ${r === 'W' ? 'form-w' : 'form-l'}" title="${r === 'W' ? 'Win' : 'Loss'}"></span>`).join('')
       : '<span class="form-none">—</span>';
+    const avatarUrl = `/api/players/${p.id}/avatar?league=${currentLeague}`;
     return `
       <tr>
         <td class="pos ${posClass}">${rank}</td>
+        <td class="avatar-cell"><img class="league-avatar" data-id="${p.id}" src="${avatarUrl}" alt="" /></td>
         <td class="player-name"><a href="/player.html?id=${p.id}&league=${currentLeague}" class="player-link">${esc(p.name)}</a>${crown}</td>
         <td class="num"><span class="rating-badge">${p.rating}</span></td>
         <td class="num">${p.wins}</td>
@@ -130,7 +132,7 @@ async function loadLeague() {
     <table>
       <thead>
         <tr>
-          <th>#</th><th>Player</th>
+          <th>#</th><th class="avatar-head"></th><th>Player</th>
           <th class="num">ELO</th><th class="num">W</th><th class="num">L</th><th class="num">Win%</th><th class="form-head">Form</th>
         </tr>
       </thead>

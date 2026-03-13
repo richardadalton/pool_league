@@ -194,6 +194,19 @@ tbody td.num { text-align: right; }
 
 .win-pct { color: var(--muted); font-size: 0.85rem; }
 
+/* ── League table avatars ── */
+.avatar-head { width: 36px; padding: 0; }
+.avatar-cell { width: 36px; padding: 6px 4px; }
+
+.league-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+  border: 1px solid var(--border);
+}
+
 /* ── Form guide ── */
 .form-head {
   text-align: center;

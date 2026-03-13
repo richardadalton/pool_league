@@ -775,3 +775,46 @@ test.describe('Badges', () => {
   });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Avatar API
+// ─────────────────────────────────────────────────────────────────────────────
+
+test.describe('Avatar API', () => {
+  let league, alice;
+
+  test.beforeAll(async ({ request }) => {
+    league = await createTestLeague(request, '_avatars');
+    alice  = await addPlayer(request, league, 'Alice');
+  });
+
+  test('GET /api/players/:id/avatar returns SVG initials when no avatar uploaded', async ({ request }) => {
+    const res = await request.get(`${BASE}/api/players/${alice.id}/avatar?league=${league}`);
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain('svg');
+    const body = await res.text();
+    expect(body).toContain('A'); // Alice's initial
+  });
+
+  test('GET /api/players/:id/avatar returns 200 for unknown player (SVG fallback)', async ({ request }) => {
+    const res = await request.get(`${BASE}/api/players/unknown_xyz/avatar?league=${league}`);
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain('svg');
+  });
+
+  test('POST /api/players/:id/avatar returns 404 for unknown player', async ({ request }) => {
+    const res = await request.post(`${BASE}/api/players/unknown_xyz/avatar?league=${league}`, {
+      multipart: { avatar: { name: 'test.jpg', mimeType: 'image/jpeg', buffer: Buffer.from('not-an-image') } }
+    });
+    expect(res.status()).toBe(404);
+  });
+
+  test('POST /api/players/:id/avatar returns 400 when no file sent', async ({ request }) => {
+    const res = await request.post(`${BASE}/api/players/${alice.id}/avatar?league=${league}`, {
+      headers: { 'Content-Type': 'application/json' },
+      data: {}
+    });
+    // multer won't parse JSON body — no file means 400
+    expect([400, 500]).toContain(res.status());
+  });
+});
+

@@ -329,15 +329,79 @@ A subtle bug was caught and fixed: after a game deletion, if an auto-snapshot ex
 
 ---
 
+### 19. Player Avatars / Photos
+
+#### Design decisions
+
+| Concern | Decision |
+|---|---|
+| **Storage location** | `data/<league>/avatars/<playerId>.jpg` — filesystem, not JSONL. Avatars are mutable binary files, not events |
+| **Format** | Always converted to JPEG on upload via `sharp` — consistent, small, universally supported |
+| **Size** | Cropped to square then resized to 200×200px on upload — caps storage, ensures consistent display |
+| **Overwrite** | Re-uploading simply overwrites the previous file — no versioning needed |
+| **File size limit** | 5 MB max enforced by `multer` before any processing |
+| **Cache busting** | Upload response includes `?v=<timestamp>` query param — forces browser to reload the new image immediately |
+| **Default avatar** | When no file exists, the `GET` route returns a generated SVG circle with the player's initials in a colour derived from the player ID — app always looks good before anyone uploads |
+
+#### New npm dependencies
+
+```bash
+npm install multer sharp
+```
+
+- **multer** — parses `multipart/form-data` uploads in Express; configured with `memoryStorage()` so the buffer goes straight to `sharp` without touching disk as a temp file
+- **sharp** — resizes, centre-crops to square, converts to JPEG
+
+#### Backend — two new routes
+
+**`GET /api/players/:id/avatar?league=pool`**
+- Streams `avatars/<playerId>.jpg` with `Cache-Control: max-age=86400` if it exists
+- Falls back to a generated SVG with the player's initials if not — colour chosen deterministically from the player ID character code
+- Returns SVG (not 404) for unknown player IDs so broken image icons never appear
+
+**`POST /api/players/:id/avatar?league=pool`**
+- Accepts `multipart/form-data` with field name `avatar`
+- Returns 404 if player ID not found in the league cache
+- Returns 400 if no file is present
+- Processes via `sharp`: resize to 200×200, fit `cover`, position `centre`, quality 85 JPEG
+- Saves to `data/<league>/avatars/<playerId>.jpg`
+- Returns `{ avatarUrl }` with a cache-busting timestamp
+
+#### Frontend changes
+
+**League table (`public/js/index.js`, `public/css/index.css`)**
+- New `avatar-cell` column added between rank and player name
+- Each cell contains a 28×28px `<img class="league-avatar">` pointing at the avatar endpoint
+- After a successful upload on the profile page, any matching `league-avatar` images on the same page are updated immediately via `data-id` attribute
+
+**Player profile hero (`public/js/player.js`, `public/css/player.css`)**
+- `hero-avatar` changed from a letter `<div>` to an `<img>` inside a `<label>` wrapper
+- Clicking the avatar opens a hidden `<input type="file">` — no separate button needed
+- A camera emoji overlay (`avatar-overlay`) fades in on hover to signal it's clickable
+- On file selection the upload fires immediately, the `src` updates on success, and the label gets an `uploading` class while the request is in flight
+
+#### Tests added (4 new API tests, 136 total)
+
+| Test | What it checks |
+|---|---|
+| GET returns SVG initials when no avatar uploaded | Content-Type is SVG, body contains player's initial |
+| GET returns SVG fallback for unknown player | No 404 — always returns something renderable |
+| POST returns 404 for unknown player | Player validation before processing |
+| POST returns 400 when no file sent | File presence validation |
+
+---
+
 ## Tech Stack
 
 | Layer | Technology |
 |-------|------------|
 | Backend | Node.js + Express |
+| File uploads | multer (multipart parsing) + sharp (image resize/crop/convert) |
 | Frontend | Vanilla HTML, CSS, JavaScript |
 | Data storage | Append-only JSONL files (one directory per league), monthly snapshots, in-memory cache |
+| Avatar storage | JPEG files in `data/<league>/avatars/`, SVG initials fallback generated server-side |
 | Charts | Chart.js (ELO history chart on profile page) |
-| Testing | Playwright (API + UI, 120 tests) |
+| Testing | Playwright (API + UI, 136 tests) |
 | Version control | Git + GitHub |
 
 ---
@@ -355,6 +419,7 @@ pool_league/
 │   ├── pool/
 │   │   ├── players.jsonl  # Pool player registrations (append-only)
 │   │   ├── games.jsonl    # Pool game results (append-only)
+│   │   ├── avatars/       # Player avatar JPEGs (<playerId>.jpg)
 │   │   └── snapshots/     # Monthly derived-state snapshots
 │   ├── chess/
 │   │   ├── players.jsonl
@@ -396,6 +461,8 @@ All routes accept a `?league=` query parameter (defaults to `pool`).
 | `GET` | `/api/players?league=pool` | Get all players sorted by ELO |
 | `POST` | `/api/players?league=pool` | Add a new player `{ name }` |
 | `GET` | `/api/players/:id/profile?league=pool` | Get full stats for a player |
+| `GET` | `/api/players/:id/avatar?league=pool` | Get player avatar (JPEG or SVG initials fallback) |
+| `POST` | `/api/players/:id/avatar?league=pool` | Upload player avatar (multipart `avatar` field, max 5 MB) |
 | `GET` | `/api/games?league=pool` | Get all games (most recent first) |
 | `POST` | `/api/games?league=pool` | Record a game result `{ winnerId, loserId }` |
 | `DELETE` | `/api/games/:id?league=pool` | Delete a game `{ winnerName }` — requires winner's name as confirmation |
