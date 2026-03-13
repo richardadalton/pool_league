@@ -137,14 +137,14 @@ npm run test:ui
 npm run test:report
 ```
 
-### What's covered (120 tests)
+### What's covered (132 tests)
 
 | Suite | Tests | Covers |
 |-------|-------|--------|
-| `api.spec.js` | 56 | Leagues, Players, Games, Profile, Records, ELO maths, King of the Hill, Badges, Form guide, Biggest Upset, Active Streak |
-| `home.spec.js` | 24 | League table, Form guide, Add player, Record game, Game history, League switcher |
+| `api.spec.js` | 62 | Leagues, Players, Games, Delete Game (tombstone), Profile, Records, ELO maths, King of the Hill, Badges, Form guide, Biggest Upset, Active Streak |
+| `home.spec.js` | 30 | League table, Form guide, Add player, Record game, Game history, Delete game UI, League switcher |
 | `player.spec.js` | 20 | Hero section, Stats grid, Badges, Streaks, Results history, ELO chart, 404 |
-| `records.spec.js` | 20 | Layout, All 6 record cards, Holder links, Biggest Upset, Active Streak, Empty state |
+| `records.spec.js` | 20 | Layout, All 7 record cards, Holder links, Biggest Upset, Active Streak, Empty state |
 
 ---
 
@@ -161,6 +161,7 @@ All game/player routes accept a `?league=` query parameter (defaults to `pool`).
 | `GET` | `/api/players/:id/profile?league=pool` | Get full stats for a player |
 | `GET` | `/api/games?league=pool` | Get all games (most recent first) |
 | `POST` | `/api/games?league=pool` | Record a game result `{ winnerId, loserId }` |
+| `DELETE` | `/api/games/:id?league=pool` | Delete a game `{ winnerName }` — requires winner's name as confirmation |
 | `GET` | `/api/records?league=pool` | Get all-time records for a league |
 | `POST` | `/api/admin/snapshot?league=pool` | Force a snapshot of the current derived state |
 

@@ -245,8 +245,101 @@ test.describe('Games API', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Player Profile
+// Delete Game (tombstone)
 // ─────────────────────────────────────────────────────────────────────────────
+
+test.describe('Delete Game API', () => {
+  let league, alice, bob;
+
+  test.beforeAll(async ({ request }) => {
+    league = await createTestLeague(request, '_delete');
+    alice  = await addPlayer(request, league, 'Alice');
+    bob    = await addPlayer(request, league, 'Bob');
+  });
+
+  test('DELETE /api/games/:id removes the game from the list', async ({ request }) => {
+    const game = await recordGame(request, league, alice.id, bob.id);
+
+    const del = await request.delete(`${BASE}/api/games/${game.id}?league=${league}`, {
+      data: { winnerName: 'Alice' },
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(del.status()).toBe(200);
+    expect((await del.json()).ok).toBe(true);
+
+    const games = await (await request.get(`${BASE}/api/games?league=${league}`)).json();
+    expect(games.find(g => g.id === game.id)).toBeUndefined();
+  });
+
+  test('DELETE /api/games/:id recalculates ratings after deletion', async ({ request }) => {
+    // Start fresh
+    const l  = await createTestLeague(request, '_del_ratings');
+    const a  = await addPlayer(request, l, 'Alice');
+    const b  = await addPlayer(request, l, 'Bob');
+
+    // Record two games, delete the first
+    const g1 = await recordGame(request, l, a.id, b.id);
+    await recordGame(request, l, a.id, b.id);
+
+    // Before delete: Alice has 2 wins
+    const before = await (await request.get(`${BASE}/api/players?league=${l}`)).json();
+    const aliceBefore = before.players.find(p => p.id === a.id);
+    expect(aliceBefore.wins).toBe(2);
+
+    // Delete the first game
+    await request.delete(`${BASE}/api/games/${g1.id}?league=${l}`, {
+      data: { winnerName: 'Alice' },
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    // After delete: Alice has 1 win, ratings replayed from 1 game only
+    const after = await (await request.get(`${BASE}/api/players?league=${l}`)).json();
+    const aliceAfter = after.players.find(p => p.id === a.id);
+    expect(aliceAfter.wins).toBe(1);
+  });
+
+  test('DELETE /api/games/:id returns 403 when wrong winner name supplied', async ({ request }) => {
+    const game = await recordGame(request, league, alice.id, bob.id);
+
+    const res = await request.delete(`${BASE}/api/games/${game.id}?league=${league}`, {
+      data: { winnerName: 'WrongName' },
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(res.status()).toBe(403);
+
+    // Game should still be present
+    const games = await (await request.get(`${BASE}/api/games?league=${league}`)).json();
+    expect(games.find(g => g.id === game.id)).toBeDefined();
+  });
+
+  test('DELETE /api/games/:id returns 403 when no winner name supplied', async ({ request }) => {
+    const game = await recordGame(request, league, alice.id, bob.id);
+
+    const res = await request.delete(`${BASE}/api/games/${game.id}?league=${league}`, {
+      data: {},
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(res.status()).toBe(403);
+  });
+
+  test('DELETE /api/games/:id returns 404 for unknown game id', async ({ request }) => {
+    const res = await request.delete(`${BASE}/api/games/nonexistent_id?league=${league}`, {
+      data: { winnerName: 'Alice' },
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(res.status()).toBe(404);
+  });
+
+  test('winner name check is case-insensitive', async ({ request }) => {
+    const game = await recordGame(request, league, alice.id, bob.id);
+
+    const res = await request.delete(`${BASE}/api/games/${game.id}?league=${league}`, {
+      data: { winnerName: 'ALICE' },
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(res.status()).toBe(200);
+  });
+});
 
 test.describe('Player Profile API', () => {
   let league, alice, bob, charlie;

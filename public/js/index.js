@@ -152,7 +152,7 @@ async function loadHistory() {
   }
 
   list.innerHTML = games.slice(0, 50).map(g => `
-    <div class="game-item">
+    <div class="game-item" id="game-item-${esc(g.id)}">
       <div class="vs">
         <span class="game-winner">${esc(g.winnerName)}</span>
         <span class="vs-sep">beat</span>
@@ -160,7 +160,47 @@ async function loadHistory() {
       </div>
       <span class="game-change">+${g.ratingChange} pts</span>
       <span class="game-time">${fmtDate(g.playedAt)}</span>
+      <button class="delete-btn" title="Delete game" onclick="showDeleteConfirm('${esc(g.id)}')">🗑</button>
+      <div class="delete-confirm" id="delete-confirm-${esc(g.id)}" style="display:none">
+        <span class="delete-label">Type winner's name to confirm:</span>
+        <input type="text" class="delete-input" id="delete-input-${esc(g.id)}"
+               placeholder="${esc(g.winnerName)}"
+               onkeydown="if(event.key==='Enter')deleteGame('${esc(g.id)}')"/>
+        <button class="btn btn-danger" onclick="deleteGame('${esc(g.id)}')">Delete</button>
+        <button class="btn btn-cancel" onclick="hideDeleteConfirm('${esc(g.id)}')">Cancel</button>
+      </div>
     </div>`).join('');
+}
+
+function showDeleteConfirm(gameId) {
+  // Hide any other open confirmations first
+  document.querySelectorAll('.delete-confirm').forEach(el => el.style.display = 'none');
+  const confirm = document.getElementById(`delete-confirm-${gameId}`);
+  confirm.style.display = 'flex';
+  document.getElementById(`delete-input-${gameId}`).focus();
+}
+
+function hideDeleteConfirm(gameId) {
+  const confirm = document.getElementById(`delete-confirm-${gameId}`);
+  confirm.style.display = 'none';
+  document.getElementById(`delete-input-${gameId}`).value = '';
+}
+
+async function deleteGame(gameId) {
+  const input = document.getElementById(`delete-input-${gameId}`);
+  const typed = input.value.trim();
+  if (!typed) { input.classList.add('input-err'); input.focus(); return; }
+  input.classList.remove('input-err');
+
+  try {
+    await api('DELETE', `/api/games/${gameId}?league=${currentLeague}`, { winnerName: typed });
+    await refresh();
+  } catch (e) {
+    input.classList.add('input-err');
+    input.placeholder = e.message;
+    input.value = '';
+    input.focus();
+  }
 }
 
 // ── Populate selects ──────────────────────────────────────────────────────────

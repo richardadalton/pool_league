@@ -211,6 +211,53 @@ test.describe('Home Page — Game History', () => {
     const item = page.locator('.game-item').first();
     await expect(item.locator('.game-change')).toContainText('pts');
   });
+
+  test('each game item has a delete button', async ({ page }) => {
+    await expect(page.locator('.game-item .delete-btn').first()).toBeAttached();
+  });
+
+  test('delete confirm panel is hidden by default', async ({ page }) => {
+    await expect(page.locator('.delete-confirm').first()).toBeHidden();
+  });
+
+  test('clicking trash icon reveals the confirmation panel', async ({ page }) => {
+    await page.locator('.delete-btn').first().click();
+    await expect(page.locator('.delete-confirm').first()).toBeVisible();
+  });
+
+  test('cancel button hides the confirmation panel', async ({ page }) => {
+    await page.locator('.delete-btn').first().click();
+    await expect(page.locator('.delete-confirm').first()).toBeVisible();
+    await page.locator('.btn-cancel').first().click();
+    await expect(page.locator('.delete-confirm').first()).toBeHidden();
+  });
+
+  test('wrong winner name shows error state on input', async ({ page }) => {
+    await page.locator('.delete-btn').first().click();
+    await page.locator('.delete-input').first().fill('WrongName');
+    await page.locator('.btn-danger').first().click();
+    await expect(page.locator('.delete-input').first()).toHaveClass(/input-err/);
+  });
+
+  test('correct winner name deletes the game and refreshes', async ({ request, page }) => {
+    // Use a fresh league so we control exactly what game is on screen
+    const dl = await createTestLeague(request, '_del_ui');
+    const da = await addPlayer(request, dl, 'Alice');
+    const db = await addPlayer(request, dl, 'Bob');
+    await recordGame(request, dl, da.id, db.id);
+
+    await page.goto(`${BASE}/`);
+    await page.evaluate(l => localStorage.setItem('currentLeague', l), dl);
+    await page.goto(`${BASE}/`);
+    await page.waitForSelector('.game-item');
+
+    await page.locator('.delete-btn').first().click();
+    await page.locator('.delete-input').first().fill('Alice');
+    await page.locator('.btn-danger').first().click();
+
+    // After deletion the history list should show empty state
+    await expect(page.locator('#history-list .empty-state')).toBeVisible({ timeout: 5_000 });
+  });
 });
 
 test.describe('Home Page — League Switcher', () => {

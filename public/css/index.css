@@ -295,6 +295,7 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
   padding: 12px 16px;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 14px;
   font-size: 0.88rem;
 }
@@ -326,4 +327,67 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
   font-size: 0.75rem;
   white-space: nowrap;
 }
+
+/* ── Delete game ── */
+.delete-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.95rem;
+  opacity: 0.3;
+  padding: 2px 4px;
+  border-radius: 5px;
+  transition: opacity 0.15s, background 0.15s;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.game-item:hover .delete-btn { opacity: 0.7; }
+.delete-btn:hover { opacity: 1 !important; background: rgba(248,113,113,0.12); }
+
+.delete-confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  width: 100%;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.delete-label {
+  font-size: 0.78rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.delete-input {
+  flex: 1;
+  min-width: 120px;
+  max-width: 200px;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  border-radius: 6px;
+}
+
+.delete-input.input-err {
+  border-color: var(--red) !important;
+}
+
+.btn-danger {
+  background: var(--red) !important;
+  color: #fff !important;
+  padding: 6px 14px !important;
+  font-size: 0.82rem !important;
+}
+.btn-danger:hover { opacity: 0.85; }
+
+.btn-cancel {
+  background: var(--surface2) !important;
+  color: var(--muted) !important;
+  border: 1px solid var(--border) !important;
+  padding: 6px 14px !important;
+  font-size: 0.82rem !important;
+}
+.btn-cancel:hover { color: var(--text) !important; }
 

@@ -284,6 +284,51 @@ data/<league>/
 
 ---
 
+### 18. Delete Game Feature
+
+#### Design decision — tombstone approach
+Because the storage model is append-only, games cannot be physically removed. Instead, a **tombstone record** is appended to `games.jsonl`:
+
+```json
+{ "_tombstone": true, "gameId": "abc123", "deletedAt": "2026-03-13T..." }
+```
+
+When `readJsonl` loads the file it does a two-pass read:
+1. Parse every line
+2. Collect all `_tombstone` entries into a `Set` of deleted IDs
+3. Filter out tombstone lines and any games whose `id` is in the set
+
+Order doesn't matter — the tombstone can appear anywhere in the file and is always applied correctly.
+
+#### Snapshot invalidation on delete
+A subtle bug was caught and fixed: after a game deletion, if an auto-snapshot existed (snapped *before* the deletion), cold-reloading would use that snapshot as the base — meaning it already had ratings that included the deleted game. Deleting it from the log wouldn't change the snapshot-based ratings.
+
+**Fix:** the DELETE route clears all snapshot files for the league before cold-reloading, forcing a full replay from raw events. This guarantees correct derived state after any deletion.
+
+#### API — `DELETE /api/games/:id`
+- Requires `{ winnerName }` in the request body as a confirmation step
+- Comparison is **case-insensitive**
+- Returns `403` if the name doesn't match — guards against accidental deletion
+- Returns `404` if the game ID is not found
+- On success: appends tombstone → clears snapshots → evicts cache → cold-reloads
+
+#### UI — trash icon with inline confirmation
+- Each game row in Recent Games shows a 🗑 trash icon button
+- The icon is hidden until the row is hovered (low visual noise when not needed)
+- Clicking the icon opens an **inline confirmation row** beneath that game; any other open confirmation closes automatically
+- The confirmation row shows: label → text input (placeholder = winner's name) → **Delete** button → **Cancel** button
+- Pressing Enter in the input triggers delete
+- If the typed name doesn't match, the input border turns red and the error message replaces the placeholder — no page navigation
+- On success, the entire page refreshes via `refresh()`
+
+#### Tests added
+- **API** (`api.spec.js`): 6 new tests — game removed from list, ratings recalculated after delete, 403 on wrong name, 403 on missing name, 404 on unknown ID, case-insensitive name check
+- **UI** (`home.spec.js`): 7 new tests — delete button present, confirmation hidden by default, trash click reveals panel, cancel hides panel, wrong name shows error state, correct name deletes game and refreshes history
+
+**Total: 132 tests, all passing.**
+
+---
+
 ## Tech Stack
 
 | Layer | Technology |
@@ -353,6 +398,7 @@ All routes accept a `?league=` query parameter (defaults to `pool`).
 | `GET` | `/api/players/:id/profile?league=pool` | Get full stats for a player |
 | `GET` | `/api/games?league=pool` | Get all games (most recent first) |
 | `POST` | `/api/games?league=pool` | Record a game result `{ winnerId, loserId }` |
+| `DELETE` | `/api/games/:id?league=pool` | Delete a game `{ winnerName }` — requires winner's name as confirmation |
 | `GET` | `/api/records?league=pool` | Get all-time records |
 | `POST` | `/api/admin/snapshot?league=pool` | Force a snapshot of derived state |
 

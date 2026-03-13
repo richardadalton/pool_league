@@ -44,10 +44,16 @@ function ensureLeagueDir(league) {
 /** Read all JSON lines from a file, skipping blank lines. */
 function readJsonl(filePath) {
   if (!fs.existsSync(filePath)) return [];
-  return fs.readFileSync(filePath, 'utf8')
+  const lines = fs.readFileSync(filePath, 'utf8')
     .split('\n')
     .filter(l => l.trim())
     .map(l => JSON.parse(l));
+
+  // Apply tombstones: collect deleted game ids, then filter them out
+  const deleted = new Set(
+    lines.filter(l => l._tombstone).map(l => l.gameId)
+  );
+  return lines.filter(l => !l._tombstone && !deleted.has(l.id));
 }
 
 /** Append a single object as a JSON line. */
@@ -618,6 +624,38 @@ app.post('/api/games', (req, res) => {
   games.push(game);
 
   res.status(201).json({ ...game, winnerName: winner.name, loserName: loser.name });
+});
+
+app.delete('/api/games/:id', (req, res) => {
+  const league = resolveLeague(req, res); if (!league) return;
+  const { id } = req.params;
+  const { winnerName } = req.body; // confirmation: caller must supply the winner's name
+
+  const { games, players } = getCache(league);
+  const game = games.find(g => g.id === id);
+  if (!game) return res.status(404).json({ error: 'Game not found' });
+
+  // Confirm the caller knows who won — guards against accidental deletion
+  const winner = players.find(p => p.id === game.winnerId);
+  const expectedName = winner ? winner.name.trim().toLowerCase() : '';
+  if (!winnerName || winnerName.trim().toLowerCase() !== expectedName) {
+    return res.status(403).json({ error: 'Winner name does not match' });
+  }
+
+  // Append tombstone to the log
+  appendJsonl(gamesPath(league), { _tombstone: true, gameId: id, deletedAt: new Date().toISOString() });
+
+  // Clear snapshots so the cold reload replays from scratch (snapshots predate the deletion)
+  const snapDir = path.join(leagueDir(league), 'snapshots');
+  if (fs.existsSync(snapDir)) {
+    fs.readdirSync(snapDir).forEach(f => fs.unlinkSync(path.join(snapDir, f)));
+  }
+
+  // Rebuild cache from scratch so all derived state (ratings, wins, losses) is correct
+  leagueCache.delete(league);
+  coldLoad(league);
+
+  res.json({ ok: true });
 });
 
 // ── Start ─────────────────────────────────────────────────────────────────────
