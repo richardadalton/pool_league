@@ -137,6 +137,7 @@ League data is stored in the `./data/` directory on your machine (mounted into t
 - Use the **league switcher** in the header to switch between leagues
 - Click **＋ New** to create a new league — this creates a new data directory automatically
 - The active league is remembered in `localStorage` per browser
+- Any page can be deep-linked to a specific league by appending `?league=<slug>` to the URL (e.g. `/?league=chess`, `/records.html?league=backgammon`) — the page will load that league and update `localStorage` accordingly
 
 ---
 
@@ -201,11 +202,11 @@ npm run test:ui
 npm run test:report
 ```
 
-### What's covered (167 tests)
+### What's covered (165 tests)
 
 | Suite | Tests | Covers |
 |-------|-------|--------|
-| `api.spec.js` | 85 | Leagues, Players (incl. currentStreak), Games, Delete Game, Profile (incl. rivals, nemeses, tie-breaking), Records (incl. no-games eligibility), ELO maths, King of the Hill, Badges (incl. dynamic Record Holder, upset winner eligibility), Form guide, Biggest Upset, Active Streak, Avatars, Snapshot safety |
+| `api.spec.js` | 83 | Leagues, Players (incl. currentStreak), Games, Delete Game, Profile (incl. rivals, nemeses, tie-breaking), Records (incl. no-games eligibility), ELO maths, King of the Hill, Badges (incl. dynamic Record Holder, upset winner eligibility), Form guide, Biggest Upset, Active Streak, Avatars, Snapshot safety |
 | `home.spec.js` | 34 | League table (incl. avatar column, streak column), Form guide, Add player, Record game, Game history, Delete game UI, League switcher |
 | `player.spec.js` | 28 | Hero section (incl. avatar), Stats grid, Badges, Streaks, Results history, ELO chart, Rival & Nemesis cards, 404 |
 | `records.spec.js` | 20 | Layout, All 7 record cards, Holder links, Biggest Upset, Active Streak, Empty state |

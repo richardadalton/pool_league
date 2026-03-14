@@ -833,7 +833,104 @@ All 167 tests pass unchanged.
 
 ---
 
-## Tech Stack
+### 30. Test Suite Reliability — Eliminating Flaky Tests
+
+#### Problem
+
+The Playwright test suite was intermittently failing — roughly 1–3 tests would fail on some runs and pass on others, without any code change. Failures were non-deterministic and appeared most often when the full suite was run (not individual files).
+
+#### Root causes identified
+
+**1. Double-navigation race condition (primary cause)**
+
+Every `beforeEach` in the UI test files used a three-step pattern to set the active league:
+
+```js
+await page.goto(`${BASE}/`);                                      // first load
+await page.evaluate(l => localStorage.setItem('currentLeague', l), league);
+await page.goto(`${BASE}/`);                                      // second load
+await page.waitForSelector('table', { timeout: 10_000 });
+```
+
+Under server load (all test files' `beforeAll` hooks firing simultaneously at suite start), the second navigation frequently timed out or picked up stale DOM from the first load before the API response had returned. This caused `waitForSelector('table')` to find the table shell but not the populated rows, causing downstream assertions to fail.
+
+**2. `records.spec.js` polling timeout too tight**
+
+The `gotoRecords` helper used `waitForFunction` with a 15 s timeout inside a 30 s overall test timeout — leaving only 15 s for the page to load, the API to respond, and the DOM to update. Under load this margin disappeared.
+
+**3. Implicit test ordering dependencies in `Players API`**
+
+Several tests in the `Players API` describe block silently depended on side-effects from earlier tests in the same block:
+- `POST /api/players rejects duplicate name` relied on Alice having been added by the *previous* test
+- `form reflects recent results correctly` relied on a game recorded by *another* previous test
+
+If Playwright ran just one of these tests in isolation (e.g. after a retry), the required state was missing and the test failed.
+
+**4. `waitForTimeout(500)` magic delay**
+
+The duplicate player UI test used `await page.waitForTimeout(500)` between two API calls. This arbitrary delay sometimes wasn't enough under load.
+
+**5. `webServer` startup timeout too short**
+
+The test server had a 10 s startup timeout in `playwright.config.js`. On a busy machine this was marginal.
+
+#### Fixes
+
+**URL query param league selection** — Both `public/js/index.js` and `public/js/records.js` were updated to read a `?league=` URL query parameter on page load and store it in `localStorage`:
+
+```js
+const _urlLeague = new URLSearchParams(window.location.search).get('league');
+if (_urlLeague) localStorage.setItem('currentLeague', _urlLeague);
+let currentLeague = localStorage.getItem('currentLeague') || 'pool';
+```
+
+This means tests can navigate directly to `/?league=tl_abc123` and the page will load the correct league data immediately — no double-navigation needed.
+
+**All `beforeEach` blocks rewritten** — the three-step double-navigation pattern was replaced with a single direct navigation:
+
+```js
+// Before — two page loads, one evaluate()
+await page.goto(`${BASE}/`);
+await page.evaluate(l => localStorage.setItem('currentLeague', l), league);
+await page.goto(`${BASE}/`);
+
+// After — one page load, league in URL
+await page.goto(`${BASE}/?league=${league}`, { waitUntil: 'networkidle', timeout: 30_000 });
+```
+
+`waitUntil: 'networkidle'` ensures all API fetches have completed before any assertions run.
+
+**`waitForSelector` timeouts increased** — from `10_000` to `20_000` ms throughout `beforeEach` blocks, giving enough headroom even under server load.
+
+**`Players API` describe block refactored** — all shared state (Alice, Bob, one game) moved into `beforeAll` so no test depends on a previous test's side-effects:
+
+```js
+test.beforeAll(async ({ request }) => {
+  league = await createTestLeague(request, '_players');
+  alice  = await addPlayer(request, league, 'Alice');
+  bob    = await addPlayer(request, league, 'Bob');
+  await recordGame(request, league, alice.id, bob.id);
+});
+```
+
+**`waitForTimeout(500)` removed** — replaced with `await expect(page.locator('#player-msg')).toContainText('DupePlayer', { timeout: 5_000 })` — waits for the actual first-add confirmation message before attempting the duplicate.
+
+**Config timeouts increased:**
+
+| Setting | Before | After |
+|---------|--------|-------|
+| `timeout` (per test) | 30 s | 60 s |
+| `expect.timeout` | 8 s | 10 s |
+| `webServer.timeout` | 10 s | 20 s |
+
+#### Result
+
+165 tests (83 API + 34 home + 28 player + 20 records) pass consistently across repeated runs with `--retries=0`. The 1-retry safety net in `playwright.config.js` is retained as a last-resort guard but is no longer needed to hide flakiness.
+
+> **Note:** Test count moved from 167 to 165 — the `Players API` refactor consolidated two tests that previously relied on sequential state into assertions against `beforeAll`-created data, removing the need for two standalone setup-only tests.
+
+---
+
 
 | Layer | Technology |
 |-------|------------|
@@ -843,7 +940,7 @@ All 167 tests pass unchanged.
 | Data storage | Append-only JSONL files (one directory per league), monthly snapshots, in-memory cache |
 | Avatar storage | JPEG files in `data/<league>/avatars/`, SVG initials fallback generated server-side |
 | Charts | Chart.js (ELO history chart on profile page) |
-| Testing | Playwright (API + UI, 167 tests, retries: 1) |
+| Testing | Playwright (API + UI, 165 tests, retries: 1) |
 | Deployment | Docker + Docker Compose |
 | Version control | Git + GitHub |
 
