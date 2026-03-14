@@ -168,15 +168,18 @@ async function loadHistory() {
     return;
   }
 
-  list.innerHTML = games.slice(0, 50).map(g => `
+  list.innerHTML = games.slice(0, 50).map(g => {
+    const date = g.playedAt
+      ? new Date(g.playedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+      : '';
+    return `
     <div class="game-item" id="game-item-${esc(g.id)}">
       <div class="vs">
         <span class="game-winner">${esc(g.winnerName)}</span>
         <span class="vs-sep">beat</span>
         <span class="game-loser">${esc(g.loserName)}</span>
       </div>
-      <span class="game-change">+${g.ratingChange} pts</span>
-      <span class="game-time">${fmtDate(g.playedAt)}</span>
+      <span class="game-date">${date}</span>
       <button class="delete-btn" title="Delete game" onclick="showDeleteConfirm('${esc(g.id)}')">🗑</button>
       <div class="delete-confirm" id="delete-confirm-${esc(g.id)}" style="display:none">
         <span class="delete-label">Type winner's name to confirm:</span>
@@ -186,7 +189,8 @@ async function loadHistory() {
         <button class="btn btn-danger" onclick="deleteGame('${esc(g.id)}')">Delete</button>
         <button class="btn btn-cancel" onclick="hideDeleteConfirm('${esc(g.id)}')">Cancel</button>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 function showDeleteConfirm(gameId) {
@@ -280,7 +284,7 @@ async function recordGame() {
   btn.disabled = true;
   try {
     const g = await api('POST', `/api/games?league=${currentLeague}`, { winnerId, loserId });
-    setMsg('game-msg', `✅ ${g.winnerName} beat ${g.loserName} (+${g.ratingChange} pts)`, false);
+    setMsg('game-msg', `✅ ${g.winnerName} beat ${g.loserName} (+${g.ratingChange})`, false);
     document.getElementById('winner-select').value = '';
     document.getElementById('loser-select').value  = '';
     await refresh();

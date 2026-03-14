@@ -156,17 +156,6 @@ test.describe('Player Profile — Results History', () => {
   });
 });
 
-test.describe('Player Profile — ELO Chart', () => {
-  test('chart canvas is rendered', async ({ page }) => {
-    await gotoAliceProfile(page);
-    await expect(page.locator('#elo-chart')).toBeVisible();
-  });
-
-  test('chart card heading is visible', async ({ page }) => {
-    await gotoAliceProfile(page);
-    await expect(page.locator('text=ELO Rating History')).toBeVisible();
-  });
-});
 
 test.describe('Player Profile — 404 handling', () => {
   test('shows not found message for invalid player id', async ({ page }) => {

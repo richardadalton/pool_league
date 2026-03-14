@@ -154,8 +154,11 @@ function loadLatestSnapshot(league) {
 function writeSnapshot(league, players) {
   ensureLeagueDir(league);
   const snapshotAt = new Date().toISOString();
-  const filename   = snapshotAt.slice(0, 10) + '.json'; // one per day max
-  fs.writeFileSync(path.join(snapshotsDir(league), filename), JSON.stringify({ snapshotAt, players }, null, 2));
+  const filename   = snapshotAt.slice(0, 10) + '.json';
+  fs.writeFileSync(
+    path.join(snapshotsDir(league), filename),
+    JSON.stringify({ snapshotAt, players }, null, 2)
+  );
 }
 
 /** Days elapsed since an ISO date string. */
@@ -163,17 +166,29 @@ function daysSince(isoDate) {
   return (Date.now() - new Date(isoDate).getTime()) / (1000 * 60 * 60 * 24);
 }
 
-/** Delete all snapshot files for a league (called before a cold-reload after game deletion). */
-function clearSnapshots(league) {
+/**
+ * Delete snapshot files that were taken at or after `gamePlayedAt`.
+ * Snapshots taken before the deleted game are still valid and are kept,
+ * so cold load only needs to replay from the last good snapshot forward.
+ */
+function clearSnapshotsAfter(league, gamePlayedAt) {
   const dir = snapshotsDir(league);
-  if (fs.existsSync(dir)) {
-    fs.readdirSync(dir).forEach(f => fs.unlinkSync(path.join(dir, f)));
-  }
+  if (!fs.existsSync(dir)) return;
+  fs.readdirSync(dir)
+    .filter(f => f.endsWith('.json'))
+    .forEach(f => {
+      try {
+        const snap = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+        if (snap.snapshotAt >= gamePlayedAt) fs.unlinkSync(path.join(dir, f));
+      } catch {
+        fs.unlinkSync(path.join(dir, f)); // remove unreadable snapshots
+      }
+    });
 }
 
 
 function maybeAutoSnapshot(league, players) {
-  if (players.length === 0) return;   // never snapshot an empty league
+  if (players.length === 0) return;
   const snap = loadLatestSnapshot(league);
   if (!snap || daysSince(snap.snapshotAt) >= SNAPSHOT_DAYS) writeSnapshot(league, players);
 }
@@ -195,39 +210,24 @@ function calcElo(winnerRating, loserRating) {
 
 // ── Shared per-player stats helper ───────────────────────────────────────────
 //
-// Computes all per-player derived values that require iterating playerGames:
-//   streaks, highest/lowest ELO, ELO history.
-// Called by the league-table route, the profile route, and computeRecordMaps
-// so the logic lives in exactly one place.
+// Derives streak data from the game list. All other stats (high/low ELO,
+// ELO history) are already carried as player-level aggregates from replayGames.
 //
 // Returns:
-//   { longestWinStreak, longestLossStreak, currentStreak,
-//     highestRating, lowestRating, activeWinStreak, eloHistory }
+//   { longestWinStreak, longestLossStreak, currentStreak, activeWinStreak }
 
-function computePlayerGameStats(playerId, playerGames, startingRating = INITIAL_RATING) {
+function computePlayerStreaks(playerId, playerGames) {
   let longestWin = 0, longestLoss = 0, curWin = 0, curLoss = 0;
-  let high = 0, low = Infinity;
-  const eloHistory = [{ rating: startingRating, playedAt: null, label: 'Start' }];
 
   for (const g of playerGames) {
-    const won = g.winnerId === playerId;
-    const ratingAfter = won ? g.winnerRatingAfter : g.loserRatingAfter;
-
-    if (won) { curWin++; curLoss = 0; if (curWin  > longestWin)  longestWin  = curWin; }
-    else     { curLoss++; curWin = 0; if (curLoss > longestLoss) longestLoss = curLoss; }
-
-    if (ratingAfter > high) high = ratingAfter;
-    if (ratingAfter < low)  low  = ratingAfter;
-
-    eloHistory.push({ rating: ratingAfter, playedAt: g.playedAt });
+    if (g.winnerId === playerId) {
+      curWin++; curLoss = 0;
+      if (curWin  > longestWin)  longestWin  = curWin;
+    } else {
+      curLoss++; curWin = 0;
+      if (curLoss > longestLoss) longestLoss = curLoss;
+    }
   }
-
-  // If no games were played, high/low fall back to starting rating
-  if (playerGames.length === 0) { high = startingRating; low = startingRating; }
-
-  // Clamp so the start rating (1000) is always included in the range
-  if (startingRating > high) high = startingRating;
-  if (startingRating < low)  low  = startingRating;
 
   const currentStreak = playerGames.length === 0
     ? { type: null, count: 0 }
@@ -235,41 +235,73 @@ function computePlayerGameStats(playerId, playerGames, startingRating = INITIAL_
       ? { type: 'W', count: curWin }
       : { type: 'L', count: curLoss };
 
-  // activeWinStreak: curWin only if the last game was a win, else 0
   const activeWinStreak = currentStreak.type === 'W' ? curWin : 0;
 
   return { longestWinStreak: longestWin, longestLossStreak: longestLoss,
-           currentStreak, highestRating: high, lowestRating: low,
-           activeWinStreak, eloHistory };
+           currentStreak, activeWinStreak };
 }
 
 
 
 /**
- * Given a base player list (from snapshot or raw registrations) and a list of
- * games to replay, return the fully-derived player state.
+ * Replay all games from a base player list and return fully-derived player state.
+ *
+ * All derived data is tracked as player-level aggregates — nothing is written
+ * back to the game objects. Games remain pure identity records: { id, winnerId,
+ * loserId, playedAt }.
+ *
+ * Each player in the returned array carries:
+ *   rating, wins, losses
+ *   highestRating, lowestRating
+ *   biggestUpset: { diff, opponentId, gameId } | null   (for biggest-upset record)
+ *   beatTop: boolean                                     (for Giant Killer badge)
  */
 function replayGames(basePlayers, games) {
   const state = new Map();
   for (const p of basePlayers) {
     state.set(p.id, {
-      id:           p.id,
-      name:         p.name,
-      userId:       p.userId || null,
-      registeredAt: p.registeredAt,
-      rating:       typeof p.rating  === 'number' ? p.rating  : INITIAL_RATING,
-      wins:         typeof p.wins    === 'number' ? p.wins    : 0,
-      losses:       typeof p.losses  === 'number' ? p.losses  : 0,
+      id:            p.id,
+      name:          p.name,
+      userId:        p.userId || null,
+      registeredAt:  p.registeredAt,
+      rating:        typeof p.rating  === 'number' ? p.rating  : INITIAL_RATING,
+      wins:          typeof p.wins    === 'number' ? p.wins    : 0,
+      losses:        typeof p.losses  === 'number' ? p.losses  : 0,
+      highestRating: typeof p.highestRating === 'number' ? p.highestRating : (typeof p.rating === 'number' ? p.rating : INITIAL_RATING),
+      lowestRating:  typeof p.lowestRating  === 'number' ? p.lowestRating  : (typeof p.rating === 'number' ? p.rating : INITIAL_RATING),
+      biggestUpset:  p.biggestUpset || null,
+      beatTop:       p.beatTop      || false,
     });
   }
+
   for (const g of games) {
     const w = state.get(g.winnerId);
     const l = state.get(g.loserId);
-    if (!w || !l) continue; // orphaned game — skip
+    if (!w || !l) continue;
+
     const { newWinnerRating, newLoserRating } = calcElo(w.rating, l.rating);
+
+    // Beat the top-rated player — check before advancing ratings
+    const topRating = Math.max(...[...state.values()].map(p => p.rating));
+    if (l.rating >= topRating) w.beatTop = true;
+
+    // Biggest upset — track on the winner
+    const upsetDiff = l.rating - w.rating;
+    if (upsetDiff > 0 && (!w.biggestUpset || upsetDiff > w.biggestUpset.diff)) {
+      w.biggestUpset = { diff: upsetDiff, opponentId: l.id, gameId: g.id };
+    }
+
+    // Advance ratings
     w.rating = newWinnerRating; w.wins++;
     l.rating = newLoserRating;  l.losses++;
+
+    // Track high/low
+    if (w.rating > w.highestRating) w.highestRating = w.rating;
+    if (w.rating < w.lowestRating)  w.lowestRating  = w.rating;
+    if (l.rating > l.highestRating) l.highestRating = l.rating;
+    if (l.rating < l.lowestRating)  l.lowestRating  = l.rating;
   }
+
   return [...state.values()];
 }
 
@@ -277,39 +309,37 @@ function replayGames(basePlayers, games) {
 //
 // leagueCache: Map<slug, { players: Player[], games: Game[] }>
 //
-// • Populated lazily on first request (cold load = snapshot + replay)
+// • Populated lazily on first request (cold load = snapshot + tail replay)
 // • Updated in-place on every write — no re-replay needed
-// • Cleared on app restart
+// • Cleared on app restart (triggering a fresh cold load)
 
 const leagueCache = new Map();
 
 /**
- * Cold-load: find latest snapshot, load only games after its timestamp,
- * replay them, cache the result, and auto-snapshot if due.
+ * Cold-load a league into the cache.
+ *
+ * Uses snapshot + tail replay for player state (bounded to ≤30 days of games).
+ * replayGames builds all derived player aggregates (ratings, high/low, biggest
+ * upset, beatTop). Nothing derived is stored in the log — everything is computed here.
  */
 function coldLoad(league) {
   ensureLeagueDir(league);
 
-  const snap     = loadLatestSnapshot(league);
   const allGames = readJsonl(gamesPath(league));
+  const snap     = loadLatestSnapshot(league);
 
-  let basePlayers, replaySubset;
-
+  let players;
   if (snap && snap.players && snap.players.length > 0) {
-    basePlayers  = snap.players;
-    replaySubset = allGames.filter(g => g.playedAt > snap.snapshotAt);
+    const tail = allGames.filter(g => g.playedAt > snap.snapshotAt);
+    players = replayGames(snap.players, tail);
   } else {
     const rawPlayers = readJsonl(playersPath(league));
-    basePlayers      = rawPlayers.map(p => ({ ...p, rating: INITIAL_RATING, wins: 0, losses: 0 }));
-    replaySubset     = allGames;
+    const base       = rawPlayers.map(p => ({ ...p, rating: INITIAL_RATING, wins: 0, losses: 0 }));
+    players = replayGames(base, allGames);
   }
 
-  const players = replayGames(basePlayers, replaySubset);
   maybeAutoSnapshot(league, players);
-
-  const entry = { players, games: allGames };
-  leagueCache.set(league, entry);
-  return entry;
+  leagueCache.set(league, { players, games: allGames });
 }
 
 /** Get the cached state for a league, loading it if necessary. */
@@ -384,10 +414,10 @@ function computeRecordMaps(players, games) {
     track('mostGamesPlayed', p.wins + p.losses, p.id);
     track('mostGamesWon',    p.wins,             p.id);
 
-    const stats = computePlayerGameStats(p.id, pg);
-    track('highestEloRating',       stats.highestRating,   p.id);
-    track('longestWinStreak',       stats.longestWinStreak, p.id);
-    track('longestActiveWinStreak', stats.activeWinStreak,  p.id);
+    const { longestWinStreak, activeWinStreak } = computePlayerStreaks(p.id, pg);
+    track('highestEloRating',       p.highestRating,   p.id);
+    track('longestWinStreak',       longestWinStreak,  p.id);
+    track('longestActiveWinStreak', activeWinStreak,   p.id);
   }
 
   // Defend the Hill — games are already in chronological order in the cache
@@ -416,11 +446,13 @@ function computeRecordMaps(players, games) {
 }
 
 // Return the player ID who holds the current biggest upset, or null if none.
-function computeBiggestUpsetHolder(games) {
+function computeBiggestUpsetHolder(players) {
   let best = 0, holderId = null;
-  for (const g of games) {
-    const diff = g.loserRatingBefore - g.winnerRatingBefore;
-    if (diff > best) { best = diff; holderId = g.winnerId; }
+  for (const p of players) {
+    if (p.biggestUpset && p.biggestUpset.diff > best) {
+      best = p.biggestUpset.diff;
+      holderId = p.id;
+    }
   }
   return holderId;
 }
@@ -436,27 +468,11 @@ function computeBadges(player, playerGames, allPlayers, allGames, recHolders) {
   if (played >= 50)       earned.add('games_50');
   if (played >= 100)      earned.add('games_100');
 
-  // Beat the top-rated player — O(n) single forward pass.
-  // Build a running map of every player's rating as of each game,
-  // then check if the loser was the top-rated player at that moment.
-  {
-    const runningRatings = {};  // playerId → rating just before this game
-    allPlayers.forEach(p => { runningRatings[p.id] = INITIAL_RATING; });
-
-    for (const g of allGames) {
-      // snapshot ratings *before* this game is applied
-      const topRating = Math.max(...Object.values(runningRatings));
-      if (g.winnerId === player.id && runningRatings[g.loserId] >= topRating) {
-        earned.add('beat_top');
-      }
-      // advance running state
-      runningRatings[g.winnerId] = g.winnerRatingAfter;
-      runningRatings[g.loserId]  = g.loserRatingAfter;
-    }
-  }
+  // Beat the top-rated player — tracked as aggregate during replayGames
+  if (player.beatTop) earned.add('beat_top');
 
   const holdsAny = Object.values(recHolders).some(s => s.has(player.id))
-                || computeBiggestUpsetHolder(allGames) === player.id;
+                || computeBiggestUpsetHolder(allPlayers) === player.id;
   const holdsAll = Object.values(recHolders).every(s => s.size === 1 && s.has(player.id));
   if (holdsAny) earned.add('achieve_record');
   if (holdsAll) earned.add('all_records');
@@ -471,10 +487,9 @@ function computeBadges(player, playerGames, allPlayers, allGames, recHolders) {
 /** Build the results history array (most-recent first) for a player's profile. */
 function computeProfileResults(player, playerGames, players) {
   return [...playerGames].reverse().map(g => ({
-    result:       g.winnerId === player.id ? 'W' : 'L',
-    opponent:     playerName(players, g.winnerId === player.id ? g.loserId : g.winnerId),
-    ratingChange: g.winnerId === player.id ? +g.ratingChange : -g.ratingChange,
-    playedAt:     g.playedAt,
+    result:   g.winnerId === player.id ? 'W' : 'L',
+    opponent: playerName(players, g.winnerId === player.id ? g.loserId : g.winnerId),
+    playedAt: g.playedAt,
   }));
 }
 
@@ -642,7 +657,7 @@ app.get('/api/players', (req, res) => {
 
     const form = playerGames.slice(-5).map(g => g.winnerId === p.id ? 'W' : 'L');
 
-    const { currentStreak } = computePlayerGameStats(p.id, playerGames);
+    const { currentStreak } = computePlayerStreaks(p.id, playerGames);
 
     return { ...p, form, currentStreak };
   });
@@ -670,13 +685,17 @@ app.post('/api/leagues/:league/join', (req, res) => {
   }
 
   const player = {
-    id:           `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    name:         user.name,
-    userId:       user.id,
-    registeredAt: new Date().toISOString(),
-    rating:       INITIAL_RATING,
-    wins:         0,
-    losses:       0,
+    id:            `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    name:          user.name,
+    userId:        user.id,
+    registeredAt:  new Date().toISOString(),
+    rating:        INITIAL_RATING,
+    wins:          0,
+    losses:        0,
+    highestRating: INITIAL_RATING,
+    lowestRating:  INITIAL_RATING,
+    biggestUpset:  null,
+    beatTop:       false,
   };
 
   appendJsonl(playersPath(league), { id: player.id, name: player.name, userId: player.userId, registeredAt: player.registeredAt });
@@ -731,13 +750,17 @@ app.post('/api/players', (req, res) => {
   if (duplicate) return res.status(400).json({ error: 'Player already exists' });
 
   const player = {
-    id:           `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    name:         name.trim(),
-    userId:       null,
-    registeredAt: new Date().toISOString(),
-    rating:       INITIAL_RATING,
-    wins:         0,
-    losses:       0,
+    id:            `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    name:          name.trim(),
+    userId:        null,
+    registeredAt:  new Date().toISOString(),
+    rating:        INITIAL_RATING,
+    wins:          0,
+    losses:        0,
+    highestRating: INITIAL_RATING,
+    lowestRating:  INITIAL_RATING,
+    biggestUpset:  null,
+    beatTop:       false,
   };
 
   appendJsonl(playersPath(league), { id: player.id, name: player.name, userId: player.userId, registeredAt: player.registeredAt });
@@ -760,7 +783,7 @@ app.get('/api/players/:id/profile', (req, res) => {
   const position    = [...players].sort((a, b) => b.rating - a.rating).findIndex(p => p.id === player.id) + 1;
   const total       = player.wins + player.losses;
 
-  const stats   = computePlayerGameStats(player.id, playerGames);
+  const streaks = computePlayerStreaks(player.id, playerGames);
   const results = computeProfileResults(player, playerGames, players);
   const { rivals, nemeses } = computeH2H(player, playerGames, players);
   const { recHolders } = computeRecordMaps(players, games);
@@ -780,12 +803,11 @@ app.get('/api/players/:id/profile', (req, res) => {
     winPct: total ? Math.round((player.wins / total) * 100) : 0,
     claimable,
     results,
-    longestWinStreak:  stats.longestWinStreak,
-    longestLossStreak: stats.longestLossStreak,
-    currentStreak:     stats.currentStreak,
-    highestRating:     stats.highestRating,
-    lowestRating:      stats.lowestRating,
-    eloHistory:        stats.eloHistory,
+    longestWinStreak:  streaks.longestWinStreak,
+    longestLossStreak: streaks.longestLossStreak,
+    currentStreak:     streaks.currentStreak,
+    highestRating:     player.highestRating,
+    lowestRating:      player.lowestRating,
     badges: computeBadges(player, playerGames, players, games, recHolders),
     rivals, nemeses,
   });
@@ -819,15 +841,15 @@ app.get('/api/records', (req, res) => {
 
   for (const player of players) {
     const pg = games.filter(g => g.winnerId === player.id || g.loserId === player.id);
-    if (pg.length === 0) continue;   // must have played at least one game to hold a record
+    if (pg.length === 0) continue;
 
     addHolder(records.mostGamesPlayed, player.wins + player.losses, player);
     addHolder(records.mostGamesWon,    player.wins,                 player);
 
-    const stats = computePlayerGameStats(player.id, pg);
-    addHolder(records.highestEloRating,       stats.highestRating,    player);
-    addHolder(records.longestWinStreak,       stats.longestWinStreak,  player);
-    addHolder(records.longestActiveWinStreak, stats.activeWinStreak,   player);
+    const { longestWinStreak, activeWinStreak } = computePlayerStreaks(player.id, pg);
+    addHolder(records.highestEloRating,       player.highestRating, player);
+    addHolder(records.longestWinStreak,       longestWinStreak,     player);
+    addHolder(records.longestActiveWinStreak, activeWinStreak,      player);
   }
 
   // Defend the Hill
@@ -853,16 +875,18 @@ app.get('/api/records', (req, res) => {
     for (const player of players) addHolder(records.defendTheHill, defendBest[player.id] || 0, player);
   }
 
-  // Biggest upset
-  for (const g of games) {
-    const diff = g.loserRatingBefore - g.winnerRatingBefore;
+  // Biggest upset — read from player aggregates computed during replay
+  for (const player of players) {
+    if (!player.biggestUpset) continue;
+    if (player.wins + player.losses === 0) continue;
+    const { diff, opponentId } = player.biggestUpset;
     if (diff > records.biggestUpset.ratingDiff) {
       records.biggestUpset = {
         ratingDiff: diff,
-        winnerId:   g.winnerId,
-        winnerName: playerName(players, g.winnerId),
-        loserId:    g.loserId,
-        loserName:  playerName(players, g.loserId),
+        winnerId:   player.id,
+        winnerName: player.name,
+        loserId:    opponentId,
+        loserName:  playerName(players, opponentId),
       };
     }
   }
@@ -898,29 +922,37 @@ app.post('/api/games', (req, res) => {
   if (!winner) return res.status(404).json({ error: 'Winner not found' });
   if (!loser)  return res.status(404).json({ error: 'Loser not found' });
 
-  const { newWinnerRating, newLoserRating, change } = calcElo(winner.rating, loser.rating);
-
-  const game = {
-    id:                 `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    winnerId:           winner.id,
-    loserId:            loser.id,
-    winnerRatingBefore: winner.rating,
-    loserRatingBefore:  loser.rating,
-    winnerRatingAfter:  newWinnerRating,
-    loserRatingAfter:   newLoserRating,
-    ratingChange:       change,
-    playedAt:           new Date().toISOString(),
+  // Only store the immutable identity fields — ratings are always derived on load
+  const logEntry = {
+    id:       `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    winnerId: winner.id,
+    loserId:  loser.id,
+    playedAt: new Date().toISOString(),
   };
 
-  // Append to log (single atomic write)
-  appendJsonl(gamesPath(league), game);
+  appendJsonl(gamesPath(league), logEntry);
 
-  // Update cache in-place — no re-replay needed
+  // Update cache in-place
+  const { newWinnerRating, newLoserRating, change } = calcElo(winner.rating, loser.rating);
+
+  // Update player aggregates
+  const upsetDiff = loser.rating - winner.rating;
+  if (upsetDiff > 0 && (!winner.biggestUpset || upsetDiff > winner.biggestUpset.diff)) {
+    winner.biggestUpset = { diff: upsetDiff, opponentId: loser.id, gameId: logEntry.id };
+  }
+  const topRating = Math.max(...players.map(p => p.rating));
+  if (loser.rating >= topRating) winner.beatTop = true;
+
   winner.rating = newWinnerRating; winner.wins++;
   loser.rating  = newLoserRating;  loser.losses++;
-  games.push(game);
+  if (winner.rating > winner.highestRating) winner.highestRating = winner.rating;
+  if (winner.rating < winner.lowestRating)  winner.lowestRating  = winner.rating;
+  if (loser.rating  > loser.highestRating)  loser.highestRating  = loser.rating;
+  if (loser.rating  < loser.lowestRating)   loser.lowestRating   = loser.rating;
 
-  res.status(201).json({ ...game, winnerName: winner.name, loserName: loser.name });
+  games.push(logEntry);
+
+  res.status(201).json({ ...logEntry, winnerName: winner.name, loserName: loser.name, ratingChange: change });
 });
 
 app.delete('/api/games/:id', (req, res) => {
@@ -943,10 +975,10 @@ app.delete('/api/games/:id', (req, res) => {
   // Append tombstone to the log
   appendJsonl(gamesPath(league), { _tombstone: true, gameId: id, deletedAt: new Date().toISOString() });
 
-  // Clear snapshots so the cold reload replays from scratch (snapshots predate the deletion)
-  clearSnapshots(league);
+  // Only clear snapshots taken at or after this game — earlier snapshots are still valid
+  clearSnapshotsAfter(league, game.playedAt);
 
-  // Rebuild cache from scratch so all derived state (ratings, wins, losses) is correct
+  // Rebuild cache from scratch so all derived state is correct
   leagueCache.delete(league);
   coldLoad(league);
 

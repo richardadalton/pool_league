@@ -178,8 +178,7 @@ test.describe('Home Page — Record a Game', () => {
     expect(await loserOptions.count()).toBeGreaterThanOrEqual(3);
   });
 
-  test('can record a game result', async ({ page }) => {
-    // Select by value — find the option whose text contains the player name
+  test('can record a game result and shows rating change', async ({ page }) => {
     const winnerOption = page.locator('#winner-select option', { hasText: 'Alice' });
     const loserOption  = page.locator('#loser-select option',  { hasText: 'Bob' });
     await page.selectOption('#winner-select', { value: await winnerOption.getAttribute('value') });
@@ -188,6 +187,7 @@ test.describe('Home Page — Record a Game', () => {
 
     await expect(page.locator('#game-msg')).toContainText('Alice', { timeout: 5_000 });
     await expect(page.locator('#game-msg')).toContainText('Bob');
+    await expect(page.locator('#game-msg')).toContainText('(+');
   });
 
   test('shows error when no winner selected', async ({ page }) => {
@@ -237,9 +237,9 @@ test.describe('Home Page — Game History', () => {
     await expect(item).toContainText('beat');
   });
 
-  test('game history shows rating change', async ({ page }) => {
+  test('game history shows winner and loser names', async ({ page }) => {
     const item = page.locator('.game-item').first();
-    await expect(item.locator('.game-change')).toContainText('pts');
+    await expect(item).toContainText('beat');
   });
 
   test('each game item has a delete button', async ({ page }) => {

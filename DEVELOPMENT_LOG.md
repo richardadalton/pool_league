@@ -1111,6 +1111,133 @@ function resolveAvatarPath(player, league) → user path if userId, else per-lea
 
 ---
 
+### 33. Remove Stored Ratings from Game Log
+
+#### Problem
+
+Each game record previously stored 5 derived rating fields alongside the identity fields:
+
+```json
+{
+  "id": "...", "winnerId": "...", "loserId": "...", "playedAt": "...",
+  "winnerRatingBefore": 1000, "loserRatingBefore": 984,
+  "winnerRatingAfter": 1016, "loserRatingAfter": 968,
+  "ratingChange": 16
+}
+```
+
+This is wrong in an append-only model with tombstone deletes. When a game is deleted, all subsequent stored ratings are stale — they were calculated from a game that no longer logically exists.
+
+#### Solution: Player-level aggregates
+
+All derived data is now tracked as **player-level aggregates** computed during `replayGames`. Games are pure identity records:
+
+```json
+{ "id": "...", "winnerId": "...", "loserId": "...", "playedAt": "..." }
+```
+
+Each player in the in-memory cache carries:
+
+| Aggregate | Purpose |
+|---|---|
+| `rating` | Current ELO |
+| `wins`, `losses` | Game counts |
+| `highestRating`, `lowestRating` | ELO high/low records |
+| `biggestUpset` | `{ diff, opponentId, gameId }` — for biggest upset record |
+| `beatTop` | `boolean` — for Giant Killer badge |
+
+`eloHistory` was removed entirely — the ELO history chart was dropped, eliminating the need to track per-game rating history. This keeps snapshots compact (no growing arrays) and removes Chart.js as a dependency.
+
+`ratingChange` is computed at write time in `POST /api/games` and returned in the response only — it is never stored on game objects, in the log, or in the cache.
+
+#### Snapshot design
+
+Snapshots store the player aggregate objects. On cold load:
+- **With snapshot**: load players from snapshot (with all aggregates), replay only the tail games
+- **Without snapshot**: full replay from `players.jsonl`
+
+The snapshot no longer needs to store any game data. It is purely player state.
+
+#### Coldload cost
+
+| Scenario | Work done |
+|---|---|
+| With snapshot (normal) | Read snapshot + replay ≤30 days of games |
+| Without snapshot (first load) | Full replay of all games |
+| After tombstone delete | Cache cleared → cold load triggered (same as above) |
+
+#### Functions renamed/removed
+
+- `computePlayerGameStats` → replaced by `computePlayerStreaks` (streaks only; high/low/eloHistory now on player object)
+- `computeBiggestUpsetHolder(games)` → `computeBiggestUpsetHolder(players)` (reads `player.biggestUpset`)
+- Beat-top-player running-ratings pass in `computeBadges` removed — uses `player.beatTop` instead
+
+---
+
+### 34. ELO Chart Removed — Leaner Snapshots & Game Log
+
+#### Decisions
+
+**ELO history chart removed.**
+The chart required tracking `eloHistory` — a growing array of `{ rating, playedAt }` entries on every player. This array was stored in the in-memory cache, in snapshots, and grew with every game ever played. Removing the chart eliminates this entirely.
+
+**Impact on snapshots:**
+Previously each snapshot contained the full ELO history for every player — potentially thousands of entries per player. Now snapshots contain only the compact player aggregate fields: `rating`, `wins`, `losses`, `highestRating`, `lowestRating`, `biggestUpset`, `beatTop`. Snapshot files are now small and bounded regardless of how many games have been played.
+
+**Chart.js removed** as a CDN dependency from `player.html`.
+
+**`ratingChange` in success message.**
+`ratingChange` is computed once at write time in `POST /api/games` and returned in the response. The frontend displays it in the success message: `✅ Richard beat Tom (+16)`. It is never stored anywhere — not in the log, not on game objects in memory, not in the cache.
+
+#### Final game log format
+
+```json
+{ "id": "...", "winnerId": "...", "loserId": "...", "playedAt": "..." }
+```
+
+Four fields. Nothing derived. Nothing that can go stale.
+
+#### Player aggregates (stored in cache + snapshot)
+
+| Field | Purpose |
+|---|---|
+| `rating` | Current ELO |
+| `wins`, `losses` | Game counts |
+| `highestRating`, `lowestRating` | All-time ELO records |
+| `biggestUpset` | `{ diff, opponentId, gameId }` — biggest upset record |
+| `beatTop` | `boolean` — Giant Killer badge |
+
+#### Tests updated
+- `player.spec.js` — removed `ELO Chart` describe block (chart no longer exists)
+- `api.spec.js` — replaced `eloHistory` test with `highestRating`/`lowestRating` test; rewrote ELO system tests and POST /api/games test to not expect rating fields in response
+- `home.spec.js` — updated record game test to verify `(+N)` appears in success message; removed `.game-change pts` UI test
+
+---
+
+### 35. Smarter Snapshot Invalidation on Game Deletion
+
+#### Problem
+
+When a game was deleted, `clearSnapshots` wiped **all** snapshots for the league. This meant cold load always had to replay every game from scratch, even if the deleted game was recent and earlier snapshots were still perfectly valid.
+
+#### Solution
+
+`clearSnapshotsAfter(league, gamePlayedAt)` — only deletes snapshots whose `snapshotAt` timestamp is **at or after** the deleted game's `playedAt`. Any snapshot taken before that game was played is unaffected by the deletion and remains valid.
+
+```
+Game deleted: played 2026-01-15
+Snapshot A:   taken  2025-12-01  → kept   (predates the game)
+Snapshot B:   taken  2026-02-01  → deleted (includes the now-deleted game)
+```
+
+On the next cold load, `loadLatestSnapshot` picks up Snapshot A and only replays games from December onwards — much less work than replaying everything.
+
+#### Worst case
+
+If the deleted game predates all snapshots, all snapshots are cleared and a full replay from `players.jsonl` is needed — same behaviour as before, but this is now the exception rather than the rule.
+
+---
+
 ## API Reference
 
 All routes accept a `?league=` query parameter (defaults to `pool`).

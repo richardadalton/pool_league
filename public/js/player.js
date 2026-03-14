@@ -93,7 +93,6 @@ function renderProfile(p, league) {
           <span class="badge ${g.result}">${g.result}</span>
           <span class="opp">vs ${esc(g.opponent)}</span>
           <span class="result-date">${date}</span>
-          <span class="chg ${g.ratingChange >= 0 ? 'pos' : 'neg'}">${g.ratingChange >= 0 ? '+' : ''}${g.ratingChange}</span>
         </div>`;
       }).join('')
     : '<span style="color:var(--muted);font-size:0.85rem">No games yet</span>';
@@ -163,11 +162,6 @@ function renderProfile(p, league) {
       </div>
     </div>
 
-    <!-- ELO History Chart -->
-    <div class="chart-card">
-      <h3>ELO Rating History</h3>
-      <div class="chart-wrap"><canvas id="elo-chart"></canvas></div>
-    </div>
 
     <!-- Streaks -->
     <div class="card" style="margin-bottom:20px">
@@ -209,7 +203,6 @@ function renderProfile(p, league) {
     </div>
   `;
 
-  renderChart(p.eloHistory);
 
   // Wire up avatar upload
   document.querySelector('.avatar-file-input').addEventListener('change', async function () {
@@ -238,72 +231,6 @@ function renderProfile(p, league) {
   });
 }
 
-// ── Chart ─────────────────────────────────────────────────────────────────────
-
-function renderChart(history) {
-  if (!history || history.length < 2) return;
-
-  const labels = history.map((h, i) => {
-    if (i === 0) return 'Start';
-    const d = new Date(h.playedAt);
-    return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
-  });
-
-  const ratings = history.map(h => h.rating);
-
-  const accentColor = '#4ade80';
-  const ctx = document.getElementById('elo-chart').getContext('2d');
-
-  const gradient = ctx.createLinearGradient(0, 0, 0, 220);
-  gradient.addColorStop(0, 'rgba(74,222,128,0.35)');
-  gradient.addColorStop(1, 'rgba(74,222,128,0.0)');
-
-  new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels,
-      datasets: [{
-        data: ratings,
-        borderColor: accentColor,
-        backgroundColor: gradient,
-        borderWidth: 2.5,
-        pointBackgroundColor: accentColor,
-        pointRadius: 4,
-        pointHoverRadius: 6,
-        fill: true,
-        tension: 0.3
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          backgroundColor: '#1a3323',
-          borderColor: '#254d33',
-          borderWidth: 1,
-          titleColor: '#86b898',
-          bodyColor: '#dcfce7',
-          callbacks: {
-            title: items => labels[items[0].dataIndex],
-            label: item => `ELO: ${item.raw}`
-          }
-        }
-      },
-      scales: {
-        x: {
-          grid: { color: '#254d33' },
-          ticks: { color: '#86b898', font: { size: 11 } }
-        },
-        y: {
-          grid: { color: '#254d33' },
-          ticks: { color: '#86b898', font: { size: 11 } }
-        }
-      }
-    }
-  });
-}
 
 // ── Claim player ──────────────────────────────────────────────────────────────
 

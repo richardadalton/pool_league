@@ -17,7 +17,6 @@ A multiplayer league tracker with **ELO ratings**, player profiles, game history
   - Current streak, longest win streak, longest loss streak
   - Highest & lowest ELO ever reached
   - Full results history (scrollable)
-  - ELO rating history chart
   - **Biggest Rival** — the opponent they have played most, with head-to-head record
   - **Nemesis** — the opponent who has beaten them most, with loss count and total games
 - **Badges & achievements** — players earn badges for milestones:
@@ -283,6 +282,8 @@ data/
 ```
 
 - **Writes are atomic** — each new user, player or game is a single `appendFileSync` call, eliminating read-modify-write race conditions.
+- **Ratings are never stored in the log** — game records contain only `{ id, winnerId, loserId, playedAt }`. All derived data (ratings, high/low ELO, biggest upset, beat-top flag) is computed during replay and stored as player-level aggregates in the in-memory cache and snapshots.
+- **`ratingChange` is computed at write time** and returned in the POST `/api/games` response for display (e.g. `Richard beat Tom (+16)`) but never persisted.
 - **Ratings are never stored** — they are always derived by replaying the game log, so they can never become stale or corrupted.
 - **Snapshots** are taken automatically on startup if the latest is ≥ 30 days old. On restart, only games logged *after* the snapshot are replayed, keeping cold-start time bounded.
 - **Snapshot safety** — a snapshot is never written for a league with zero players, and a snapshot with an empty player list is ignored on load (falls back to full replay from `players.jsonl`). This prevents a newly-created league from poisoning future cold loads.

@@ -190,24 +190,21 @@ test.describe('Games API', () => {
   });
 
   test('POST /api/games records a result and updates ratings', async ({ request }) => {
-    const aliceRatingBefore = alice.rating;
-    const bobRatingBefore   = bob.rating;
-
     const game = await recordGame(request, league, alice.id, bob.id);
 
     expect(game.winnerId).toBe(alice.id);
     expect(game.loserId).toBe(bob.id);
-    expect(game.winnerRatingAfter).toBeGreaterThan(aliceRatingBefore);
-    expect(game.loserRatingAfter).toBeLessThan(bobRatingBefore);
-    expect(game.ratingChange).toBeGreaterThan(0);
     expect(game.winnerName).toBe('Alice');
     expect(game.loserName).toBe('Bob');
     expect(game.playedAt).toBeTruthy();
 
-    // Rating changes should balance (winner gains == loser loses)
-    const winnerGain = game.winnerRatingAfter - aliceRatingBefore;
-    const loserLoss  = bobRatingBefore - game.loserRatingAfter;
-    expect(winnerGain).toBe(loserLoss);
+    // Verify ratings updated by checking the players endpoint
+    const res = await request.get(`${BASE}/api/players?league=${league}`);
+    const { players } = await res.json();
+    const updatedAlice = players.find(p => p.id === alice.id);
+    const updatedBob   = players.find(p => p.id === bob.id);
+    expect(updatedAlice.rating).toBeGreaterThan(alice.rating);
+    expect(updatedBob.rating).toBeLessThan(bob.rating);
   });
 
   test('POST /api/games rejects same winner and loser', async ({ request }) => {
@@ -237,7 +234,6 @@ test.describe('Games API', () => {
   });
 
   test('GET /api/games returns games in reverse chronological order', async ({ request }) => {
-    // Record a second game
     await recordGame(request, league, bob.id, alice.id);
 
     const res = await request.get(`${BASE}/api/games?league=${league}`);
@@ -245,7 +241,6 @@ test.describe('Games API', () => {
     const games = await res.json();
     expect(games.length).toBeGreaterThanOrEqual(2);
 
-    // Most recent first
     for (let i = 0; i < games.length - 1; i++) {
       const t1 = new Date(games[i].playedAt).getTime();
       const t2 = new Date(games[i + 1].playedAt).getTime();
@@ -386,13 +381,12 @@ test.describe('Player Profile API', () => {
     expect(p.winPct).toBe(75);
   });
 
-  test('profile contains eloHistory starting at 1000', async ({ request }) => {
+  test('profile contains highestRating and lowestRating', async ({ request }) => {
     const res = await request.get(`${BASE}/api/players/${alice.id}/profile?league=${league}`);
     const p = await res.json();
-
-    expect(Array.isArray(p.eloHistory)).toBe(true);
-    expect(p.eloHistory[0].rating).toBe(1000);
-    expect(p.eloHistory.length).toBe(5); // start + 4 games
+    expect(typeof p.highestRating).toBe('number');
+    expect(typeof p.lowestRating).toBe('number');
+    expect(p.highestRating).toBeGreaterThanOrEqual(p.lowestRating);
   });
 
   test('profile longest win streak is correct', async ({ request }) => {
@@ -748,24 +742,34 @@ test.describe('ELO rating system', () => {
     const alice = await addPlayer(request, league, 'Alice');
     const bob   = await addPlayer(request, league, 'Bob');
 
-    const game = await recordGame(request, league, alice.id, bob.id);
+    await recordGame(request, league, alice.id, bob.id);
+
+    const res = await request.get(`${BASE}/api/players?league=${league}`);
+    const { players } = await res.json();
+    const updatedAlice = players.find(p => p.id === alice.id);
+    const updatedBob   = players.find(p => p.id === bob.id);
+
     // Both start at 1000 — expected change is exactly 16
-    expect(game.ratingChange).toBe(16);
-    expect(game.winnerRatingAfter).toBe(1016);
-    expect(game.loserRatingAfter).toBe(984);
+    expect(updatedAlice.rating).toBe(1016);
+    expect(updatedBob.rating).toBe(984);
   });
 
   test('beating a higher-rated player earns more points', async ({ request }) => {
     const strong = await addPlayer(request, league, 'Strong');
     const weak   = await addPlayer(request, league, 'Weak');
 
-    // First game: weak beats strong (equal ratings → 16 pts)
-    const g1 = await recordGame(request, league, weak.id, strong.id);
+    // First game: weak beats strong (equal ratings → 16 pts each)
+    await recordGame(request, league, weak.id, strong.id);
 
-    // Now strong has a lower rating than weak — weak beating strong again earns fewer pts
-    // But strong beating weak (upset) should earn more
-    const g2 = await recordGame(request, league, strong.id, weak.id);
-    expect(g2.ratingChange).toBeGreaterThan(16);
+    // Now strong has lower rating — strong beating weak back is an upset, earns more than 16
+    await recordGame(request, league, strong.id, weak.id);
+
+    const res = await request.get(`${BASE}/api/players?league=${league}`);
+    const { players } = await res.json();
+    const updatedStrong = players.find(p => p.id === strong.id);
+
+    // Strong lost 16, then won more than 16 back — should be above 1000
+    expect(updatedStrong.rating).toBeGreaterThan(1000);
   });
 
   test('player ratings update cumulatively across games', async ({ request }) => {

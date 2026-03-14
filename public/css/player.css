@@ -320,15 +320,6 @@ a.btn-sm {
   flex-shrink: 0;
 }
 
-.result-row .chg {
-  font-size: 0.82rem;
-  font-weight: 700;
-  flex-shrink: 0;
-}
-
-.chg.pos { color: var(--green); }
-.chg.neg { color: var(--red);   }
-
 /* ── Streaks ── */
 .streak-row {
   display: flex;
@@ -429,28 +420,6 @@ a.btn-sm {
 
 
 
-/* ── Chart ── */
-.chart-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 22px;
-  margin-bottom: 20px;
-}
-
-.chart-card h3 {
-  font-size: 0.78rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--accent);
-  margin-bottom: 16px;
-}
-
-.chart-wrap {
-  position: relative;
-  height: 220px;
-}
 
 /* ── Spinner / error ── */
 .spinner {
