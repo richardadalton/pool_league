@@ -1,0 +1,29 @@
+# fly.toml — Fly.io deployment configuration for League Tracker
+# https://fly.io/docs/reference/configuration/
+
+app = 'pool-league'
+primary_region = 'lhr'   # London — change to: ams, cdg, fra, sin, syd, iad, ord, etc.
+
+[build]
+  # Uses the Dockerfile in the project root
+
+[env]
+  PORT     = "3000"
+  DATA_DIR = "/data"   # mapped to the persistent volume below
+
+[http_service]
+  internal_port       = 3000
+  force_https         = true
+  auto_stop_machines  = false   # keep always-on — no cold-start delays
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[vm]]
+  size   = 'shared-cpu-1x'   # smallest (free tier) VM
+  memory = '256mb'
+
+[[mounts]]
+  source      = 'league_data'   # Fly Volume name (created once with fly volumes create)
+  destination = '/data'         # matches DATA_DIR above
+  initial_size = '1gb'
+
