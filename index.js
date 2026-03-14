@@ -100,10 +100,15 @@ function daysSince(isoDate) {
   return (Date.now() - new Date(isoDate).getTime()) / (1000 * 60 * 60 * 24);
 }
 
-/**
- * Auto-snapshot: if no snapshot exists or the latest is >= 30 days old, write one.
- * Called after every cold-load replay.
- */
+/** Delete all snapshot files for a league (called before a cold-reload after game deletion). */
+function clearSnapshots(league) {
+  const dir = snapshotsDir(league);
+  if (fs.existsSync(dir)) {
+    fs.readdirSync(dir).forEach(f => fs.unlinkSync(path.join(dir, f)));
+  }
+}
+
+
 function maybeAutoSnapshot(league, players) {
   if (players.length === 0) return;   // never snapshot an empty league
   const snap = loadLatestSnapshot(league);
@@ -125,7 +130,57 @@ function calcElo(winnerRating, loserRating) {
   };
 }
 
-// ── Replay ────────────────────────────────────────────────────────────────────
+// ── Shared per-player stats helper ───────────────────────────────────────────
+//
+// Computes all per-player derived values that require iterating playerGames:
+//   streaks, highest/lowest ELO, ELO history.
+// Called by the league-table route, the profile route, and computeRecordMaps
+// so the logic lives in exactly one place.
+//
+// Returns:
+//   { longestWinStreak, longestLossStreak, currentStreak,
+//     highestRating, lowestRating, activeWinStreak, eloHistory }
+
+function computePlayerGameStats(playerId, playerGames, startingRating = 1000) {
+  let longestWin = 0, longestLoss = 0, curWin = 0, curLoss = 0;
+  let high = 0, low = Infinity;
+  const eloHistory = [{ rating: startingRating, playedAt: null, label: 'Start' }];
+
+  for (const g of playerGames) {
+    const won = g.winnerId === playerId;
+    const ratingAfter = won ? g.winnerRatingAfter : g.loserRatingAfter;
+
+    if (won) { curWin++; curLoss = 0; if (curWin  > longestWin)  longestWin  = curWin; }
+    else     { curLoss++; curWin = 0; if (curLoss > longestLoss) longestLoss = curLoss; }
+
+    if (ratingAfter > high) high = ratingAfter;
+    if (ratingAfter < low)  low  = ratingAfter;
+
+    eloHistory.push({ rating: ratingAfter, playedAt: g.playedAt });
+  }
+
+  // If no games were played, high/low fall back to starting rating
+  if (playerGames.length === 0) { high = startingRating; low = startingRating; }
+
+  // Clamp so the start rating (1000) is always included in the range
+  if (startingRating > high) high = startingRating;
+  if (startingRating < low)  low  = startingRating;
+
+  const currentStreak = playerGames.length === 0
+    ? { type: null, count: 0 }
+    : playerGames[playerGames.length - 1].winnerId === playerId
+      ? { type: 'W', count: curWin }
+      : { type: 'L', count: curLoss };
+
+  // activeWinStreak: curWin only if the last game was a win, else 0
+  const activeWinStreak = currentStreak.type === 'W' ? curWin : 0;
+
+  return { longestWinStreak: longestWin, longestLossStreak: longestLoss,
+           currentStreak, highestRating: high, lowestRating: low,
+           activeWinStreak, eloHistory };
+}
+
+
 
 /**
  * Given a base player list (from snapshot or raw registrations) and a list of
@@ -266,23 +321,10 @@ function computeRecordMaps(players, games) {
     track('mostGamesPlayed', p.wins + p.losses, p.id);
     track('mostGamesWon',    p.wins,             p.id);
 
-    let high = 0;
-    pg.forEach(g => {
-      const r = g.winnerId === p.id ? g.winnerRatingAfter : g.loserRatingAfter;
-      if (r > high) high = r;
-    });
-    track('highestEloRating', high, p.id);
-
-    let cw = 0, bw = 0;
-    pg.forEach(g => {
-      if (g.winnerId === p.id) { cw++; if (cw > bw) bw = cw; }
-      else                     { cw = 0; }
-    });
-    track('longestWinStreak', bw, p.id);
-
-    const lastGame     = pg[pg.length - 1];
-    const activeStreak = (lastGame && lastGame.winnerId === p.id) ? cw : 0;
-    track('longestActiveWinStreak', activeStreak, p.id);
+    const stats = computePlayerGameStats(p.id, pg);
+    track('highestEloRating',       stats.highestRating,   p.id);
+    track('longestWinStreak',       stats.longestWinStreak, p.id);
+    track('longestActiveWinStreak', stats.activeWinStreak,  p.id);
   }
 
   // Defend the Hill
@@ -321,7 +363,9 @@ function computeBiggestUpsetHolder(games) {
   return holderId;
 }
 
-function computeBadges(player, playerGames, allPlayers, allGames) {
+// recHolders is passed in from the caller (already computed by computeRecordMaps)
+// so we avoid computing it twice on every profile request.
+function computeBadges(player, playerGames, allPlayers, allGames, recHolders) {
   const earned = new Set();
   const played = player.wins + player.losses;
 
@@ -333,7 +377,6 @@ function computeBadges(player, playerGames, allPlayers, allGames) {
   // Beat the top-rated player
   playerGames.forEach(g => {
     if (g.winnerId !== player.id) return;
-    const loserBefore = g.loserRatingBefore;
     const allBefore = allGames
       .filter(og => og.playedAt < g.playedAt)
       .reduce((acc, og) => {
@@ -343,10 +386,9 @@ function computeBadges(player, playerGames, allPlayers, allGames) {
       }, {});
     allPlayers.forEach(p => { if (!(p.id in allBefore)) allBefore[p.id] = 1000; });
     const maxRating = Math.max(...Object.values(allBefore));
-    if (loserBefore >= maxRating) earned.add('beat_top');
+    if (g.loserRatingBefore >= maxRating) earned.add('beat_top');
   });
 
-  const { recHolders } = computeRecordMaps(allPlayers, allGames);
   const holdsAny = Object.values(recHolders).some(s => s.has(player.id))
                 || computeBiggestUpsetHolder(allGames) === player.id;
   const holdsAll = Object.values(recHolders).every(s => s.size === 1 && s.has(player.id));
@@ -391,7 +433,8 @@ function resolveLeague(req, res) {
 // ── Admin: manual snapshot ────────────────────────────────────────────────────
 
 app.post('/api/admin/snapshot', (req, res) => {
-  const league = resolveLeague(req, res); if (!league) return;
+  const league = resolveLeague(req, res);
+  if (!league) return;
   const { players } = getCache(league);
   writeSnapshot(league, players);
   res.json({ ok: true, snapshotAt: new Date().toISOString(), players: players.length });
@@ -400,7 +443,8 @@ app.post('/api/admin/snapshot', (req, res) => {
 // ── Players ───────────────────────────────────────────────────────────────────
 
 app.get('/api/players', (req, res) => {
-  const league = resolveLeague(req, res); if (!league) return;
+  const league = resolveLeague(req, res);
+  if (!league) return;
   const { players, games } = getCache(league);
   const sorted = [...players].sort((a, b) => b.rating - a.rating);
   const kingId = computeKingOfTheHill(games);
@@ -408,20 +452,9 @@ app.get('/api/players', (req, res) => {
   const result = sorted.map(p => {
     const playerGames = games.filter(g => g.winnerId === p.id || g.loserId === p.id);
 
-    const form = playerGames
-      .slice(-5)
-      .map(g => g.winnerId === p.id ? 'W' : 'L');
+    const form = playerGames.slice(-5).map(g => g.winnerId === p.id ? 'W' : 'L');
 
-    let curW = 0, curL = 0;
-    playerGames.forEach(g => {
-      if (g.winnerId === p.id) { curW++; curL = 0; }
-      else                     { curL++; curW = 0; }
-    });
-    const currentStreak = playerGames.length === 0
-      ? { type: null, count: 0 }
-      : playerGames[playerGames.length - 1].winnerId === p.id
-        ? { type: 'W', count: curW }
-        : { type: 'L', count: curL };
+    const { currentStreak } = computePlayerGameStats(p.id, playerGames);
 
     return { ...p, form, currentStreak };
   });
@@ -430,7 +463,8 @@ app.get('/api/players', (req, res) => {
 });
 
 app.post('/api/players', (req, res) => {
-  const league = resolveLeague(req, res); if (!league) return;
+  const league = resolveLeague(req, res);
+  if (!league) return;
   const { name } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
 
@@ -459,7 +493,8 @@ app.post('/api/players', (req, res) => {
 // ── Player profile ────────────────────────────────────────────────────────────
 
 app.get('/api/players/:id/profile', (req, res) => {
-  const league = resolveLeague(req, res); if (!league) return;
+  const league = resolveLeague(req, res);
+  if (!league) return;
   const { players, games } = getCache(league);
 
   const player = players.find(p => p.id === req.params.id);
@@ -469,41 +504,15 @@ app.get('/api/players/:id/profile', (req, res) => {
   const sorted      = [...players].sort((a, b) => b.rating - a.rating);
   const position    = sorted.findIndex(p => p.id === player.id) + 1;
 
+  // Single pass over playerGames for all derived stats
+  const stats = computePlayerGameStats(player.id, playerGames);
+
   const allResults = [...playerGames].reverse().map(g => ({
     result:       g.winnerId === player.id ? 'W' : 'L',
-    opponent:     g.winnerId === player.id
-      ? (players.find(p => p.id === g.loserId)  || { name: 'Unknown' }).name
-      : (players.find(p => p.id === g.winnerId) || { name: 'Unknown' }).name,
+    opponent:     (players.find(p => p.id === (g.winnerId === player.id ? g.loserId : g.winnerId)) || { name: 'Unknown' }).name,
     ratingChange: g.winnerId === player.id ? +g.ratingChange : -g.ratingChange,
     playedAt:     g.playedAt,
   }));
-
-  let longestWin = 0, longestLoss = 0, curWin = 0, curLoss = 0;
-  let currentStreak = { type: null, count: 0 };
-  playerGames.forEach(g => {
-    const won = g.winnerId === player.id;
-    if (won) { curWin++; curLoss = 0; if (curWin  > longestWin)  longestWin  = curWin; }
-    else     { curLoss++; curWin = 0; if (curLoss > longestLoss) longestLoss = curLoss; }
-  });
-  if (playerGames.length) {
-    const lastWon = playerGames[playerGames.length - 1].winnerId === player.id;
-    currentStreak = lastWon ? { type: 'W', count: curWin } : { type: 'L', count: curLoss };
-  }
-
-  let high = player.rating, low = player.rating;
-  playerGames.forEach(g => {
-    const r = g.winnerId === player.id ? g.winnerRatingAfter : g.loserRatingAfter;
-    if (r > high) high = r;
-    if (r < low)  low  = r;
-  });
-  if (1000 > high) high = 1000;
-  if (1000 < low)  low  = 1000;
-
-  const eloHistory = [{ rating: 1000, playedAt: null, label: 'Start' }];
-  playerGames.forEach(g => {
-    const won = g.winnerId === player.id;
-    eloHistory.push({ rating: won ? g.winnerRatingAfter : g.loserRatingAfter, playedAt: g.playedAt });
-  });
 
   const total = player.wins + player.losses;
 
@@ -512,9 +521,7 @@ app.get('/api/players/:id/profile', (req, res) => {
   const h2h = {}; // opponentId → { id, name, played, wins, losses }
   for (const g of playerGames) {
     const oppId   = g.winnerId === player.id ? g.loserId  : g.winnerId;
-    const oppName = g.winnerId === player.id
-      ? (players.find(p => p.id === g.loserId)  || { name: 'Unknown' }).name
-      : (players.find(p => p.id === g.winnerId) || { name: 'Unknown' }).name;
+    const oppName = (players.find(p => p.id === oppId) || { name: 'Unknown' }).name;
     if (!h2h[oppId]) h2h[oppId] = { id: oppId, name: oppName, played: 0, wins: 0, losses: 0 };
     h2h[oppId].played++;
     if (g.winnerId === player.id) h2h[oppId].wins++;
@@ -542,14 +549,22 @@ app.get('/api/players/:id/profile', (req, res) => {
     }
   }
 
+  // ── Records & badges — compute recHolders once, share with computeBadges ──
+  const { recHolders } = computeRecordMaps(players, games);
+
   res.json({
     id: player.id, name: player.name, rating: player.rating,
     position, totalPlayers: players.length,
     wins: player.wins, losses: player.losses, played: total,
     winPct: total ? Math.round((player.wins / total) * 100) : 0,
-    results: allResults, longestWinStreak: longestWin, longestLossStreak: longestLoss,
-    currentStreak, highestRating: high, lowestRating: low, eloHistory,
-    badges: computeBadges(player, playerGames, players, games),
+    results: allResults,
+    longestWinStreak:  stats.longestWinStreak,
+    longestLossStreak: stats.longestLossStreak,
+    currentStreak:     stats.currentStreak,
+    highestRating:     stats.highestRating,
+    lowestRating:      stats.lowestRating,
+    eloHistory:        stats.eloHistory,
+    badges: computeBadges(player, playerGames, players, games, recHolders),
     rivals, nemeses,
   });
 });
@@ -557,7 +572,8 @@ app.get('/api/players/:id/profile', (req, res) => {
 // ── Records ───────────────────────────────────────────────────────────────────
 
 app.get('/api/records', (req, res) => {
-  const league = resolveLeague(req, res); if (!league) return;
+  const league = resolveLeague(req, res);
+  if (!league) return;
   const { players, games } = getCache(league);
 
   const records = {
@@ -652,7 +668,8 @@ app.get('/api/records', (req, res) => {
 // ── Games ─────────────────────────────────────────────────────────────────────
 
 app.get('/api/games', (req, res) => {
-  const league = resolveLeague(req, res); if (!league) return;
+  const league = resolveLeague(req, res);
+  if (!league) return;
   const { players, games } = getCache(league);
   const enriched = [...games].reverse().map(g => {
     const winner = players.find(p => p.id === g.winnerId);
@@ -663,7 +680,8 @@ app.get('/api/games', (req, res) => {
 });
 
 app.post('/api/games', (req, res) => {
-  const league = resolveLeague(req, res); if (!league) return;
+  const league = resolveLeague(req, res);
+  if (!league) return;
   const { winnerId, loserId } = req.body;
   if (!winnerId || !loserId)  return res.status(400).json({ error: 'winnerId and loserId required' });
   if (winnerId === loserId)   return res.status(400).json({ error: 'Winner and loser must be different players' });
@@ -701,7 +719,8 @@ app.post('/api/games', (req, res) => {
 });
 
 app.delete('/api/games/:id', (req, res) => {
-  const league = resolveLeague(req, res); if (!league) return;
+  const league = resolveLeague(req, res);
+  if (!league) return;
   const { id } = req.params;
   const { winnerName } = req.body; // confirmation: caller must supply the winner's name
 
@@ -720,10 +739,7 @@ app.delete('/api/games/:id', (req, res) => {
   appendJsonl(gamesPath(league), { _tombstone: true, gameId: id, deletedAt: new Date().toISOString() });
 
   // Clear snapshots so the cold reload replays from scratch (snapshots predate the deletion)
-  const snapDir = path.join(leagueDir(league), 'snapshots');
-  if (fs.existsSync(snapDir)) {
-    fs.readdirSync(snapDir).forEach(f => fs.unlinkSync(path.join(snapDir, f)));
-  }
+  clearSnapshots(league);
 
   // Rebuild cache from scratch so all derived state (ratings, wins, losses) is correct
   leagueCache.delete(league);
@@ -745,7 +761,8 @@ const upload = multer({
 
 // GET /api/players/:id/avatar?league=pool — serve avatar or redirect to initials fallback
 app.get('/api/players/:id/avatar', (req, res) => {
-  const league = resolveLeague(req, res); if (!league) return;
+  const league = resolveLeague(req, res);
+  if (!league) return;
   const { id } = req.params;
   const file = avatarPath(league, id);
 
@@ -778,7 +795,8 @@ app.get('/api/players/:id/avatar', (req, res) => {
 
 // POST /api/players/:id/avatar?league=pool — upload, resize to 200×200, save as JPEG
 app.post('/api/players/:id/avatar', upload.single('avatar'), async (req, res) => {
-  const league = resolveLeague(req, res); if (!league) return;
+  const league = resolveLeague(req, res);
+  if (!league) return;
   const { id } = req.params;
 
   const { players } = getCache(league);

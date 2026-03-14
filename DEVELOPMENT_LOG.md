@@ -655,6 +655,110 @@ Both `rivals` and `nemeses` are returned as arrays so the frontend naturally han
 
 ---
 
+### 27. Code Smell Fixes — Duplicated Logic & Double Computation
+
+Two high-severity code smells identified during a code review were fixed.
+
+#### Smell 1 — Streak & ELO Calculation Duplicated in Three Places
+
+The logic for computing per-player derived stats (win/loss streaks, highest/lowest ELO, ELO history) was written out inline in three separate places:
+
+- `GET /api/players` (league table — current streak)
+- `GET /api/players/:id/profile` (profile page — all streak/ELO stats)
+- `computeRecordMaps()` (badge & records computation — streaks and highest ELO)
+
+**Fix:** Extracted a shared `computePlayerGameStats(playerId, playerGames, startingRating)` helper function that performs a single chronological pass over a player's games and returns:
+
+```js
+{ longestWinStreak, longestLossStreak, currentStreak,
+  highestRating, lowestRating, activeWinStreak, eloHistory }
+```
+
+All three call sites were updated to call this helper. The inline loops were deleted. The logic now lives in exactly one place — any future changes (e.g. adding a new stat) only need to be made once.
+
+Also fixed as part of this: the opponent name lookup in the h2h (rival/nemesis) loop was simplified using the same `(players.find(...) || { name: 'Unknown' }).name` pattern, and the redundant `loserBefore` alias in `computeBadges` was removed (now uses `g.loserRatingBefore` directly).
+
+#### Smell 2 — `computeRecordMaps` Called Twice Per Profile Request
+
+`computeBadges` called `computeRecordMaps(allPlayers, allGames)` internally. The profile route handler also needed the record holders to pass to `computeBadges` — but since `computeBadges` computed them itself, the profile route was triggering a full scan of all players and all games **twice** on every profile page load.
+
+**Fix:** `computeBadges` signature changed to accept `recHolders` as a parameter:
+
+```js
+// Before
+function computeBadges(player, playerGames, allPlayers, allGames)
+
+// After
+function computeBadges(player, playerGames, allPlayers, allGames, recHolders)
+```
+
+The profile route now calls `computeRecordMaps` once, then passes the result into `computeBadges`:
+
+```js
+const { recHolders } = computeRecordMaps(players, games);
+// ...
+badges: computeBadges(player, playerGames, players, games, recHolders)
+```
+
+`computeRecordMaps` is now called exactly once per profile request instead of twice.
+
+#### No behaviour changes
+
+All 167 tests pass unchanged. The API response shapes and all computed values are identical — this was a pure internal refactor.
+
+---
+
+### 28. Code Smell Fixes — Low Severity
+
+Two low-severity code smells identified in the same review were fixed.
+
+#### Smell 7 — Snapshot path duplicated inline in DELETE route
+
+The `DELETE /api/games/:id` route built the snapshot directory path manually:
+
+```js
+const snapDir = path.join(leagueDir(league), 'snapshots');
+if (fs.existsSync(snapDir)) {
+  fs.readdirSync(snapDir).forEach(f => fs.unlinkSync(path.join(snapDir, f)));
+}
+```
+
+This duplicated the path construction that the existing `snapshotsDir(league)` helper already encapsulates, and the inline logic had no name.
+
+**Fix:** Extracted a `clearSnapshots(league)` helper function next to the other snapshot helpers:
+
+```js
+function clearSnapshots(league) {
+  const dir = snapshotsDir(league);
+  if (fs.existsSync(dir)) {
+    fs.readdirSync(dir).forEach(f => fs.unlinkSync(path.join(dir, f)));
+  }
+}
+```
+
+The DELETE route now calls `clearSnapshots(league)` — one line, self-documenting.
+
+#### Smell 9 — Inconsistent guard style (single-line if)
+
+All 10 route handlers had their `resolveLeague` guard written as a single line:
+
+```js
+const league = resolveLeague(req, res); if (!league) return;
+```
+
+This is unusual style — two statements on one line separated by `;`. Standard JS convention (and most linter rules) expects each statement on its own line.
+
+**Fix:** Split all 10 occurrences onto two lines:
+
+```js
+const league = resolveLeague(req, res);
+if (!league) return;
+```
+
+No behaviour change — purely a readability improvement that will avoid linter warnings if ESLint is added in the future.
+
+---
+
 ## Tech Stack
 
 | Layer | Technology |
