@@ -586,6 +586,75 @@ The first successful deploy started with an empty volume because the original fa
 
 ---
 
+### 26. Rival & Nemesis on Player Profile Page
+
+#### Feature description
+Two new cards were added to each player's profile page, displayed side-by-side in a two-column grid between the Streaks card and the Results History card.
+
+**Biggest Rival** — the opponent this player has played the most games against.
+**Nemesis** — the opponent who has beaten this player the most times.
+
+#### Selection logic (backend — `GET /api/players/:id/profile`)
+
+Head-to-head stats are computed for every opponent the player has faced, producing `{ id, name, played, wins, losses }` per opponent, where `wins`/`losses` are from the **profile player's** perspective.
+
+**Rival selection:**
+- Find the maximum `played` value across all opponents
+- Return all opponents tied at that maximum (there may be more than one)
+
+**Nemesis selection:**
+- Find the maximum `losses` value (times the opponent beat the profile player)
+- If only one opponent has that maximum — they are the nemesis
+- **Tie-break 1:** if multiple opponents have beaten the player the same number of times, prefer the one with fewest total games played together — a more "efficient" tormentor
+- **Tie-break 2:** if still tied after tie-break 1, all remaining opponents are shown
+
+Both `rivals` and `nemeses` are returned as arrays so the frontend naturally handles any number of tied entries.
+
+#### Display choices (frontend — `player.js`)
+
+**Rival card** (amber heading ⚔️):
+- Subtitle: *"Most games played against"*
+- Each row: `[Player Name link]  [XW – YL (Z games)]`
+- Record shown from the **profile player's perspective** — their wins in green, their losses in red
+
+**Nemesis card** (red heading 💀):
+- Subtitle: *"Most games lost against"*
+- Each row: `[Player Name link]  [X Losses (Y games)]`
+- Only the defeat count is shown — unambiguous, no confusion about whose wins are whose
+- Wording evolution: "Defeats" → settled on "Losses" for natural language consistency
+
+#### Layout (CSS — `player.css`)
+- `.h2h-grid` — two-column CSS grid; collapses to one column on screens ≤ 540 px
+- `.rival-card h3` — amber (`#f59e0b`)
+- `.nemesis-card h3` — red (`var(--red)`)
+- Player name links styled to match the rest of the profile page; hover underline in accent colour
+- Empty states: *"No games played yet"* (rival) and *"No losses yet"* (nemesis)
+
+#### Tests added (18 new)
+
+| Test | File | What it verifies |
+|---|---|---|
+| Profile includes `rivals` array | `api.spec.js` | Field present and is an array |
+| Rival is the most-played opponent | `api.spec.js` | Bob (3 games) beats Charlie (1 game) |
+| Rival has correct W/L counts | `api.spec.js` | wins/losses from profile player perspective |
+| Profile includes `nemeses` array | `api.spec.js` | Field present and is an array |
+| Nemesis is the player who beat them most | `api.spec.js` | Bob (1 loss) is Alice's nemesis |
+| Nemesis correct for another player | `api.spec.js` | Charlie's nemesis is Alice |
+| Tied rivals — both shown | `api.spec.js` | Equal play counts → both returned |
+| Nemesis tie-break: fewest games wins | `api.spec.js` | P3 (1 game, 1 loss) beats P2 (2 games, 1 loss) |
+| Rival card visible | `player.spec.js` | `.rival-card` in DOM |
+| Nemesis card visible | `player.spec.js` | `.nemesis-card` in DOM |
+| Rival card shows most-played opponent | `player.spec.js` | Bob's name in rival card |
+| Rival card shows head-to-head record | `player.spec.js` | W and L elements visible |
+| Nemesis card shows who beat them most | `player.spec.js` | Bob's name in nemesis card |
+| Nemesis card shows loss count | `player.spec.js` | "Loss" text visible |
+| Rival name links to profile | `player.spec.js` | href matches `player.html?id=` |
+| Nemesis name links to profile | `player.spec.js` | href matches `player.html?id=` |
+
+**Total tests: 149 → 167.**
+
+---
+
 ## Tech Stack
 
 | Layer | Technology |
@@ -596,7 +665,7 @@ The first successful deploy started with an empty volume because the original fa
 | Data storage | Append-only JSONL files (one directory per league), monthly snapshots, in-memory cache |
 | Avatar storage | JPEG files in `data/<league>/avatars/`, SVG initials fallback generated server-side |
 | Charts | Chart.js (ELO history chart on profile page) |
-| Testing | Playwright (API + UI, 149 tests, retries: 1) |
+| Testing | Playwright (API + UI, 167 tests, retries: 1) |
 | Deployment | Docker + Docker Compose |
 | Version control | Git + GitHub |
 

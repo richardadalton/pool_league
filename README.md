@@ -15,6 +15,8 @@ A local multiplayer league tracker with **ELO ratings**, player profiles, game h
   - Highest & lowest ELO ever reached
   - Full results history (scrollable)
   - ELO rating history chart
+  - **Biggest Rival** — the opponent they have played most, with head-to-head record
+  - **Nemesis** — the opponent who has beaten them most, with loss count and total games
 - **Badges & achievements** — players earn badges for milestones:
   - 🥇 First Win · 🎮 Veteran (10 games) · 🏅 Seasoned (50 games) · 💯 Centurion (100 games)
   - 🗡️ Giant Killer (beat the top rated player)
@@ -199,13 +201,13 @@ npm run test:ui
 npm run test:report
 ```
 
-### What's covered (149 tests)
+### What's covered (167 tests)
 
 | Suite | Tests | Covers |
 |-------|-------|--------|
-| `api.spec.js` | 75 | Leagues, Players (incl. currentStreak), Games, Delete Game, Profile, Records (incl. no-games eligibility), ELO maths, King of the Hill, Badges (incl. dynamic Record Holder, upset winner eligibility), Form guide, Biggest Upset, Active Streak, Avatars, Snapshot safety |
+| `api.spec.js` | 85 | Leagues, Players (incl. currentStreak), Games, Delete Game, Profile (incl. rivals, nemeses, tie-breaking), Records (incl. no-games eligibility), ELO maths, King of the Hill, Badges (incl. dynamic Record Holder, upset winner eligibility), Form guide, Biggest Upset, Active Streak, Avatars, Snapshot safety |
 | `home.spec.js` | 34 | League table (incl. avatar column, streak column), Form guide, Add player, Record game, Game history, Delete game UI, League switcher |
-| `player.spec.js` | 20 | Hero section (incl. avatar), Stats grid, Badges, Streaks, Results history, ELO chart, 404 |
+| `player.spec.js` | 28 | Hero section (incl. avatar), Stats grid, Badges, Streaks, Results history, ELO chart, Rival & Nemesis cards, 404 |
 | `records.spec.js` | 20 | Layout, All 7 record cards, Holder links, Biggest Upset, Active Streak, Empty state |
 
 ---

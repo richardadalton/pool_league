@@ -507,6 +507,41 @@ app.get('/api/players/:id/profile', (req, res) => {
 
   const total = player.wins + player.losses;
 
+  // ── Rival & Nemesis ────────────────────────────────────────────────────────
+  // Build head-to-head stats against every opponent
+  const h2h = {}; // opponentId → { id, name, played, wins, losses }
+  for (const g of playerGames) {
+    const oppId   = g.winnerId === player.id ? g.loserId  : g.winnerId;
+    const oppName = g.winnerId === player.id
+      ? (players.find(p => p.id === g.loserId)  || { name: 'Unknown' }).name
+      : (players.find(p => p.id === g.winnerId) || { name: 'Unknown' }).name;
+    if (!h2h[oppId]) h2h[oppId] = { id: oppId, name: oppName, played: 0, wins: 0, losses: 0 };
+    h2h[oppId].played++;
+    if (g.winnerId === player.id) h2h[oppId].wins++;
+    else                          h2h[oppId].losses++;
+  }
+  const opponents = Object.values(h2h);
+
+  // Rival = opponent(s) most played against; ties → show all
+  let rivals = [];
+  if (opponents.length) {
+    const maxPlayed = Math.max(...opponents.map(o => o.played));
+    rivals = opponents.filter(o => o.played === maxPlayed);
+  }
+
+  // Nemesis = opponent(s) that have beaten this player most.
+  //   Tie-break 1: fewest games played together (more efficient tormentor).
+  //   Tie-break 2: if still equal after tie-break, show all.
+  let nemeses = [];
+  if (opponents.length) {
+    const maxLosses = Math.max(...opponents.map(o => o.losses));
+    if (maxLosses > 0) {
+      const mostBeaten = opponents.filter(o => o.losses === maxLosses);
+      const minPlayed  = Math.min(...mostBeaten.map(o => o.played));
+      nemeses = mostBeaten.filter(o => o.played === minPlayed);
+    }
+  }
+
   res.json({
     id: player.id, name: player.name, rating: player.rating,
     position, totalPlayers: players.length,
@@ -515,6 +550,7 @@ app.get('/api/players/:id/profile', (req, res) => {
     results: allResults, longestWinStreak: longestWin, longestLossStreak: longestLoss,
     currentStreak, highestRating: high, lowestRating: low, eloHistory,
     badges: computeBadges(player, playerGames, players, games),
+    rivals, nemeses,
   });
 });
 

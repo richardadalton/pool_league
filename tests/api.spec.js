@@ -449,6 +449,89 @@ test.describe('Player Profile API', () => {
     const res = await request.get(`${BASE}/api/players/nonexistent_xyz/profile?league=${league}`);
     expect(res.status()).toBe(404);
   });
+
+  test('profile includes rivals array', async ({ request }) => {
+    const res = await request.get(`${BASE}/api/players/${alice.id}/profile?league=${league}`);
+    const p = await res.json();
+    expect(Array.isArray(p.rivals)).toBe(true);
+  });
+
+  test('profile rival is the most-played opponent', async ({ request }) => {
+    const res = await request.get(`${BASE}/api/players/${alice.id}/profile?league=${league}`);
+    const p = await res.json();
+    // Alice played Bob twice and Charlie once — Bob should be the rival
+    expect(p.rivals.length).toBe(1);
+    expect(p.rivals[0].id).toBe(bob.id);
+    expect(p.rivals[0].played).toBe(3);
+  });
+
+  test('profile rival has correct head-to-head wins and losses', async ({ request }) => {
+    const res = await request.get(`${BASE}/api/players/${alice.id}/profile?league=${league}`);
+    const p = await res.json();
+    const rival = p.rivals[0];
+    // Alice beat Bob twice, Bob beat Alice once
+    expect(rival.wins).toBe(2);
+    expect(rival.losses).toBe(1);
+  });
+
+  test('profile includes nemeses array', async ({ request }) => {
+    const res = await request.get(`${BASE}/api/players/${alice.id}/profile?league=${league}`);
+    const p = await res.json();
+    expect(Array.isArray(p.nemeses)).toBe(true);
+  });
+
+  test('profile nemesis is the player who beat them most', async ({ request }) => {
+    const res = await request.get(`${BASE}/api/players/${alice.id}/profile?league=${league}`);
+    const p = await res.json();
+    // Bob beat Alice once, Charlie never beat Alice — Bob is nemesis
+    expect(p.nemeses.length).toBe(1);
+    expect(p.nemeses[0].id).toBe(bob.id);
+    expect(p.nemeses[0].losses).toBe(1);
+  });
+
+  test('profile nemeses is empty when player has never lost', async ({ request }) => {
+    // Charlie has only lost games in this setup — find a player who never lost
+    // Bob won 1 game. Check his nemesis
+    const res = await request.get(`${BASE}/api/players/${charlie.id}/profile?league=${league}`);
+    const p = await res.json();
+    // Charlie lost 1 game to Alice — nemesis should be Alice
+    expect(p.nemeses.length).toBe(1);
+    expect(p.nemeses[0].id).toBe(alice.id);
+  });
+
+  test('profile rivals are tied when two opponents have equal play counts', async ({ request }) => {
+    // Create a fresh league for this specific scenario
+    const tieLeague = await createTestLeague(request, '_rival_tie');
+    const p1 = await addPlayer(request, tieLeague, 'P1');
+    const p2 = await addPlayer(request, tieLeague, 'P2');
+    const p3 = await addPlayer(request, tieLeague, 'P3');
+    // P1 plays P2 once and P3 once — equal rivals
+    await recordGame(request, tieLeague, p1.id, p2.id);
+    await recordGame(request, tieLeague, p1.id, p3.id);
+
+    const res = await request.get(`${BASE}/api/players/${p1.id}/profile?league=${tieLeague}`);
+    const profile = await res.json();
+    expect(profile.rivals.length).toBe(2);
+    const rivalIds = profile.rivals.map(r => r.id);
+    expect(rivalIds).toContain(p2.id);
+    expect(rivalIds).toContain(p3.id);
+  });
+
+  test('profile nemesis tie-break: fewest games played wins', async ({ request }) => {
+    const tbLeague = await createTestLeague(request, '_nem_tb');
+    const p1 = await addPlayer(request, tbLeague, 'P1');
+    const p2 = await addPlayer(request, tbLeague, 'P2');
+    const p3 = await addPlayer(request, tbLeague, 'P3');
+    // P2 beats P1 once in 2 games; P3 beats P1 once in 1 game — P3 is nemesis (fewer total games)
+    await recordGame(request, tbLeague, p2.id, p1.id); // P2 beats P1
+    await recordGame(request, tbLeague, p1.id, p2.id); // P1 beats P2
+    await recordGame(request, tbLeague, p3.id, p1.id); // P3 beats P1
+
+    const res = await request.get(`${BASE}/api/players/${p1.id}/profile?league=${tbLeague}`);
+    const profile = await res.json();
+    expect(profile.nemeses.length).toBe(1);
+    expect(profile.nemeses[0].id).toBe(p3.id);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -52,6 +52,32 @@ function renderProfile(p, league) {
     streakClass = p.currentStreak.type === 'W' ? 'win' : 'loss';
   }
 
+  // Rivals — show head-to-head record and total games
+  const rivalsHtml = p.rivals && p.rivals.length
+    ? p.rivals.map(r => `
+        <div class="h2h-row">
+          <a class="h2h-name" href="/player.html?id=${esc(r.id)}&league=${esc(league)}">${esc(r.name)}</a>
+          <div class="h2h-record">
+            <span class="h2h-w">${r.wins}W</span>
+            <span class="h2h-sep">–</span>
+            <span class="h2h-l">${r.losses}L</span>
+            <span class="h2h-played">(${r.played} game${r.played !== 1 ? 's' : ''})</span>
+          </div>
+        </div>`).join('')
+    : '<span class="h2h-none">No games played yet</span>';
+
+  // Nemeses — show defeats (times the nemesis beat the profile player) and total games
+  const nemesesHtml = p.nemeses && p.nemeses.length
+    ? p.nemeses.map(n => `
+        <div class="h2h-row">
+          <a class="h2h-name" href="/player.html?id=${esc(n.id)}&league=${esc(league)}">${esc(n.name)}</a>
+          <div class="h2h-record">
+            <span class="h2h-l">${n.losses} Loss${n.losses !== 1 ? 'es' : ''}</span>
+            <span class="h2h-played">(${n.played} game${n.played !== 1 ? 's' : ''})</span>
+          </div>
+        </div>`).join('')
+    : '<span class="h2h-none">No losses yet</span>';
+
   // All results
   const resultsHtml = p.results.length
     ? p.results.map(g => {
@@ -149,6 +175,20 @@ function renderProfile(p, league) {
           <span class="s-label">Longest losing streak</span>
           <span class="s-val loss">${p.longestLossStreak} Loss${p.longestLossStreak !== 1 ? 'es' : ''}</span>
         </div>
+      </div>
+    </div>
+
+    <!-- Rival & Nemesis -->
+    <div class="h2h-grid">
+      <div class="card h2h-card rival-card" style="margin-bottom:20px">
+        <h3>⚔️ Biggest Rival</h3>
+        <p class="h2h-sub">Most games played against</p>
+        ${rivalsHtml}
+      </div>
+      <div class="card h2h-card nemesis-card" style="margin-bottom:20px">
+        <h3>💀 Nemesis</h3>
+        <p class="h2h-sub">Most games lost against</p>
+        ${nemesesHtml}
       </div>
     </div>
 

@@ -182,3 +182,57 @@ test.describe('Player Profile — 404 handling', () => {
   });
 });
 
+test.describe('Player Profile — Rival & Nemesis', () => {
+  test('biggest rival card is visible', async ({ page }) => {
+    await gotoAliceProfile(page);
+    await expect(page.locator('.rival-card')).toBeVisible();
+  });
+
+  test('nemesis card is visible', async ({ page }) => {
+    await gotoAliceProfile(page);
+    await expect(page.locator('.nemesis-card')).toBeVisible();
+  });
+
+  test('rival card shows most-played opponent', async ({ page }) => {
+    await gotoAliceProfile(page);
+    // Alice played Bob 3 times and Bob beat Alice once — Bob is rival and nemesis
+    const rivalCard = page.locator('.rival-card');
+    await expect(rivalCard.locator('.h2h-name')).toContainText('Bob');
+  });
+
+  test('rival card shows head-to-head record', async ({ page }) => {
+    await gotoAliceProfile(page);
+    const rivalCard = page.locator('.rival-card');
+    await expect(rivalCard.locator('.h2h-record')).toBeVisible();
+    // Should contain W and L indicators
+    await expect(rivalCard.locator('.h2h-w')).toBeVisible();
+    await expect(rivalCard.locator('.h2h-l')).toBeVisible();
+  });
+
+  test('nemesis card shows player who beat them most', async ({ page }) => {
+    await gotoAliceProfile(page);
+    const nemesisCard = page.locator('.nemesis-card');
+    await expect(nemesisCard.locator('.h2h-name')).toContainText('Bob');
+  });
+
+  test('nemesis card shows loss count', async ({ page }) => {
+    await gotoAliceProfile(page);
+    const nemesisCard = page.locator('.nemesis-card');
+    await expect(nemesisCard.locator('.h2h-l')).toContainText('Loss');
+  });
+
+  test('rival name links to opponent profile page', async ({ page }) => {
+    await gotoAliceProfile(page);
+    const rivalLink = page.locator('.rival-card .h2h-name');
+    const href = await rivalLink.getAttribute('href');
+    expect(href).toMatch(/player\.html\?id=/);
+  });
+
+  test('nemesis name links to opponent profile page', async ({ page }) => {
+    await gotoAliceProfile(page);
+    const nemesisLink = page.locator('.nemesis-card .h2h-name');
+    const href = await nemesisLink.getAttribute('href');
+    expect(href).toMatch(/player\.html\?id=/);
+  });
+});
+
