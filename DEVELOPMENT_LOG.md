@@ -462,7 +462,87 @@ The append-only file storage and in-memory cache are both per-process. Running m
 
 ---
 
-## Tech Stack
+### 22. Records Eligibility — Players Must Have Played at Least One Game
+
+- **Bug:** New players start with a rating of 1000. When the first players were added to a league and no games had been recorded yet, they were incorrectly awarded the **Highest Ever ELO** record (because their starting rating of 1000 was the highest value seen). They also shared `mostGamesPlayed` at zero and `longestWinStreak` at zero.
+- **Root cause 1 — no-games guard missing:** The records loop and `computeRecordMaps` iterated over all players regardless of whether they had played.
+- **Root cause 2 — `highestEloRating` defaulted to 1000:** The local `high` variable was initialised to `1000` before scanning a player's games, meaning even a player with zero games scored 1000 and could hold the record.
+
+#### Fix
+- Added `if (pg.length === 0) continue;` at the top of both the `GET /api/records` player loop and the `computeRecordMaps` player loop. Players with no games are completely skipped for all records.
+- Changed the `high` variable initialisation from `1000` to `0`. Only actual `winnerRatingAfter` / `loserRatingAfter` values are considered. The existing `value > 0` guard in `addHolder`/`track` then prevents a `0` from being recorded.
+
+#### Tests added (146 → 149 at this point, combined with section 24)
+
+| Test | What it verifies |
+|---|---|
+| Player with no games is not awarded `highestEloRating` | New players excluded from ELO record |
+| Player with no games is not awarded `mostGamesPlayed` | New players excluded from games played record |
+| Records show no holders when all players have played zero games | All holder arrays empty for a brand-new league |
+
+---
+
+### 23. Record Holder Badge Made Dynamic
+
+- **Previous behaviour:** The `achieve_record` (Record Holder) badge was awarded based on whether a player had *ever* set a record — it was never removed once earned.
+- **New behaviour:** The badge reflects *current* state only. It is awarded if the player currently holds or shares at least one all-time record. If they are later overtaken on every record, the badge is lost.
+- **Implementation:** `computeBadges` already recalculates from scratch on every profile request — so the badge was already technically current. The existing `holdsAny` check was correct for the streak/stats records. The only gaps were:
+  1. The **Biggest Upset** record was not included in `holdsAny`
+  2. The old code path didn't need changing for "loses the badge" — it was already dynamic
+
+#### Biggest Upset winner now eligible for Record Holder badge
+- Added `computeBiggestUpsetHolder(games)` helper — scans all games for the largest `loserRatingBefore - winnerRatingBefore` diff and returns the winner's ID.
+- `holdsAny` now also checks: `|| computeBiggestUpsetHolder(allGames) === player.id`
+- The **Grand Slam** badge deliberately excludes Biggest Upset — it is a single-winner record that cannot be tied, unlike the six stats records that Grand Slam is defined around.
+
+#### Tests added (3 new)
+
+| Test | What it verifies |
+|---|---|
+| `achieve_record` badge is awarded to biggest upset winner | Upset winner eligible for Record Holder |
+| `achieve_record` badge is lost when player no longer holds any record | Badge is dynamic, not permanent |
+| `achieve_record IS` awarded when player ties a record | Ties still qualify (existing, confirmed still passing) |
+
+---
+
+### 24. Empty Snapshot Bug — Chess League Showing No Players
+
+#### Symptoms
+- The Chess league showed an empty league table, no records, and "Unknown" for all player names in game history after the app was restarted.
+- Pool and Backgammon leagues were unaffected.
+
+#### Root cause
+When the Chess league was first created, `coldLoad` called `maybeAutoSnapshot` at the end of initialisation. At that moment the league directory existed but no players had been added yet, so a snapshot was written with `"players": []`. On every subsequent server start, `coldLoad` found this snapshot (less than 30 days old, so it was used as the base), then replayed all games against an empty player list. Every game referenced player IDs that weren't in the base state and were silently skipped as orphaned. Result: empty players array, games with "Unknown" names.
+
+#### Fixes
+
+**1. `maybeAutoSnapshot` — never snapshot an empty league**
+```js
+function maybeAutoSnapshot(league, players) {
+  if (players.length === 0) return;  // never snapshot an empty league
+  ...
+}
+```
+
+**2. `coldLoad` — treat a snapshot with zero players as missing**
+```js
+if (snap && snap.players && snap.players.length > 0) {
+  // use snapshot as base
+} else {
+  // fall back to players.jsonl + full replay
+}
+```
+If a bad snapshot already exists on disk (e.g. the Fly.io volume, or another machine), the app now falls back to the raw `players.jsonl` file and replays all games from the beginning rather than silently serving an empty league.
+
+**3. Deleted the bad snapshot** — `data/chess/snapshots/2026-03-13.json` was removed so the chess league loaded correctly immediately without needing a server restart cycle.
+
+#### Test added (1 new)
+
+| Test | What it verifies |
+|---|---|
+| Players are visible even if a league snapshot has zero players | Snapshot fallback to `players.jsonl` works correctly |
+
+---
 
 | Layer | Technology |
 |-------|------------|
@@ -472,7 +552,7 @@ The append-only file storage and in-memory cache are both per-process. Running m
 | Data storage | Append-only JSONL files (one directory per league), monthly snapshots, in-memory cache |
 | Avatar storage | JPEG files in `data/<league>/avatars/`, SVG initials fallback generated server-side |
 | Charts | Chart.js (ELO history chart on profile page) |
-| Testing | Playwright (API + UI, 143 tests, retries: 1) |
+| Testing | Playwright (API + UI, 149 tests, retries: 1) |
 | Deployment | Docker + Docker Compose |
 | Version control | Git + GitHub |
 

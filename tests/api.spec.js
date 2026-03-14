@@ -597,6 +597,67 @@ test.describe('Records API', () => {
     const res = await request.get(`${BASE}/api/records?league=doesnotexist_xyz`);
     expect(res.status()).toBe(404);
   });
+
+  test('player with no games is not awarded highestEloRating record', async ({ request }) => {
+    // Create a league, add two players but only record games for one of them
+    const nl  = await createTestLeague(request, '_norecord');
+    const na  = await addPlayer(request, nl, 'Alice');
+    await addPlayer(request, nl, 'Bob');          // Bob never plays
+    const nc  = await addPlayer(request, nl, 'Charlie');
+    await recordGame(request, nl, na.id, nc.id);  // only Alice and Charlie play
+
+    const res = await request.get(`${BASE}/api/records?league=${nl}`);
+    const r   = await res.json();
+
+    const holderNames = r.highestEloRating.holders.map(h => h.name);
+    expect(holderNames).not.toContain('Bob');
+  });
+
+  test('player with no games is not awarded mostGamesPlayed record', async ({ request }) => {
+    const nl = await createTestLeague(request, '_norecord2');
+    const na = await addPlayer(request, nl, 'Alice');
+    await addPlayer(request, nl, 'Bob');           // Bob never plays
+    const nc = await addPlayer(request, nl, 'Charlie');
+    await recordGame(request, nl, na.id, nc.id);
+
+    const res = await request.get(`${BASE}/api/records?league=${nl}`);
+    const r   = await res.json();
+
+    const holderNames = r.mostGamesPlayed.holders.map(h => h.name);
+    expect(holderNames).not.toContain('Bob');
+  });
+
+  test('records show no holders when all players have played zero games', async ({ request }) => {
+    const nl = await createTestLeague(request, '_nogames');
+    await addPlayer(request, nl, 'Alice');
+    await addPlayer(request, nl, 'Bob');
+
+    const res = await request.get(`${BASE}/api/records?league=${nl}`);
+    const r   = await res.json();
+
+    expect(r.highestEloRating.holders).toHaveLength(0);
+    expect(r.mostGamesPlayed.holders).toHaveLength(0);
+    expect(r.longestWinStreak.holders).toHaveLength(0);
+    expect(r.mostGamesWon.holders).toHaveLength(0);
+  });
+
+  test('players are visible even if a league snapshot has zero players', async ({ request }) => {
+    // Simulates the bug where a snapshot was written before any players were
+    // added — the app must fall back to players.jsonl and ignore the bad snapshot.
+    const nl = await createTestLeague(request, '_badsnap');
+    const na = await addPlayer(request, nl, 'Alice');
+    const nb = await addPlayer(request, nl, 'Bob');
+    await recordGame(request, nl, na.id, nb.id);
+
+    // Force a snapshot via the admin endpoint
+    await request.post(`${BASE}/api/admin/snapshot?league=${nl}`);
+
+    // Players should still be visible after the snapshot
+    const res = await request.get(`${BASE}/api/players?league=${nl}`);
+    const { players } = await res.json();
+    expect(players).toHaveLength(2);
+    expect(players.map(p => p.name).sort()).toEqual(['Alice', 'Bob']);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -759,6 +820,48 @@ test.describe('Badges', () => {
     const p = await res.json();
     const badge = p.badges.find(b => b.id === 'achieve_record');
     expect(badge.earned).toBe(true);
+  });
+
+  test('achieve_record badge is awarded to biggest upset winner', async ({ request }) => {
+    // Create an isolated league where only Bob wins an upset (beats a higher-rated Alice)
+    const ul = await createTestLeague(request, '_upset_badge');
+    const ua = await addPlayer(request, ul, 'Alice');
+    const ub = await addPlayer(request, ul, 'Bob');
+    // Alice wins 3 so she has a higher rating, then Bob beats her (upset)
+    await recordGame(request, ul, ua.id, ub.id);
+    await recordGame(request, ul, ua.id, ub.id);
+    await recordGame(request, ul, ua.id, ub.id);
+    await recordGame(request, ul, ub.id, ua.id);  // Bob upsets Alice
+
+    const res = await request.get(`${BASE}/api/players/${ub.id}/profile?league=${ul}`);
+    const p = await res.json();
+    const badge = p.badges.find(b => b.id === 'achieve_record');
+    expect(badge.earned).toBe(true);
+  });
+
+  test('achieve_record badge is lost when player no longer holds any record', async ({ request }) => {
+    const rl = await createTestLeague(request, '_lose_record');
+    const ra = await addPlayer(request, rl, 'Alice');
+    const rb = await addPlayer(request, rl, 'Bob');
+    const rc = await addPlayer(request, rl, 'Charlie');
+
+    // Alice wins once against Bob and once against Charlie — she briefly holds
+    // mostGamesWon, highestElo, mostGamesPlayed, longestWinStreak.
+    await recordGame(request, rl, ra.id, rb.id);
+    await recordGame(request, rl, ra.id, rc.id);
+
+    const before = await (await request.get(`${BASE}/api/players/${ra.id}/profile?league=${rl}`)).json();
+    expect(before.badges.find(b => b.id === 'achieve_record').earned).toBe(true);
+
+    // Bob now beats Alice many times then beats Charlie many times.
+    // This gives Bob: more wins, more games, a higher peak ELO, a longer
+    // win streak, and a bigger upset (beating higher-rated Alice).
+    // Alice ends up holding zero records.
+    for (let i = 0; i < 5; i++) await recordGame(request, rl, rb.id, ra.id);
+    for (let i = 0; i < 5; i++) await recordGame(request, rl, rb.id, rc.id);
+
+    const after = await (await request.get(`${BASE}/api/players/${ra.id}/profile?league=${rl}`)).json();
+    expect(after.badges.find(b => b.id === 'achieve_record').earned).toBe(false);
   });
 
   test('beat_top badge is awarded when top player is beaten', async ({ request }) => {

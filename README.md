@@ -18,17 +18,18 @@ A local multiplayer league tracker with **ELO ratings**, player profiles, game h
 - **Badges & achievements** — players earn badges for milestones:
   - 🥇 First Win · 🎮 Veteran (10 games) · 🏅 Seasoned (50 games) · 💯 Centurion (100 games)
   - 🗡️ Giant Killer (beat the top rated player)
-  - 📈 Record Holder (hold at least one all-time record)
-  - 🏆 Grand Slam (hold all five records simultaneously — sole holder, no ties)
+  - 📈 Record Holder (currently hold at least one all-time record — lost if you no longer hold any)
+  - 🏆 Grand Slam (hold all six records simultaneously — sole holder, no ties)
   - 👑 King of the Hill (win the first game, or beat the reigning king)
 - **King of the Hill** — a special title awarded to the winner of the first ever game; transfers to any player who beats the current holder
-- **Records page** — all-time bests for the active league; when players are tied, all names are shown:
+- **Records page** — all-time bests for the active league; when players are tied, all names are shown. **Players must have played at least one game to be eligible for any record.**
   - Longest winning streak
   - Longest active winning streak
   - Most games played
   - Most games won
   - Highest ever ELO rating
   - Biggest upset (largest rating deficit overcome by the winner)
+  - Defend the Hill (longest consecutive run of wins while holding King of the Hill)
 - **Game history** — full log of all recorded results
 - **Network accessible** — accessible from any device on the same Wi-Fi
 
@@ -198,11 +199,11 @@ npm run test:ui
 npm run test:report
 ```
 
-### What's covered (143 tests)
+### What's covered (149 tests)
 
 | Suite | Tests | Covers |
 |-------|-------|--------|
-| `api.spec.js` | 69 | Leagues, Players (incl. currentStreak), Games, Delete Game, Profile, Records, ELO maths, King of the Hill, Badges, Form guide, Biggest Upset, Active Streak, Avatars |
+| `api.spec.js` | 75 | Leagues, Players (incl. currentStreak), Games, Delete Game, Profile, Records (incl. no-games eligibility), ELO maths, King of the Hill, Badges (incl. dynamic Record Holder, upset winner eligibility), Form guide, Biggest Upset, Active Streak, Avatars, Snapshot safety |
 | `home.spec.js` | 34 | League table (incl. avatar column, streak column), Form guide, Add player, Record game, Game history, Delete game UI, League switcher |
 | `player.spec.js` | 20 | Hero section (incl. avatar), Stats grid, Badges, Streaks, Results history, ELO chart, 404 |
 | `records.spec.js` | 20 | Layout, All 7 record cards, Holder links, Biggest Upset, Active Streak, Empty state |
@@ -260,6 +261,7 @@ data/
 - **Writes are atomic** — each new player or game is a single `appendFileSync` call, eliminating read-modify-write race conditions.
 - **Ratings are never stored** — they are always derived by replaying the game log, so they can never become stale or corrupted.
 - **Snapshots** are taken automatically on startup if the latest is ≥ 30 days old. On restart, only games logged *after* the snapshot are replayed, keeping cold-start time bounded.
+- **Snapshot safety** — a snapshot is never written for a league with zero players, and a snapshot with an empty player list is ignored on load (falls back to full replay from `players.jsonl`). This prevents a newly-created league from poisoning future cold loads.
 - **In-memory cache** — each league's derived state is cached in memory after the first request. Switching between leagues never triggers a re-replay. Cache entries are updated in-place on every write.
 - A manual snapshot can be forced via `POST /api/admin/snapshot?league=pool`.
 - Back up the entire `data/` folder regularly to preserve league history.

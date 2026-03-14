@@ -105,6 +105,7 @@ function daysSince(isoDate) {
  * Called after every cold-load replay.
  */
 function maybeAutoSnapshot(league, players) {
+  if (players.length === 0) return;   // never snapshot an empty league
   const snap = loadLatestSnapshot(league);
   if (!snap || daysSince(snap.snapshotAt) >= 30) writeSnapshot(league, players);
 }
@@ -175,7 +176,7 @@ function coldLoad(league) {
 
   let basePlayers, replaySubset;
 
-  if (snap) {
+  if (snap && snap.players && snap.players.length > 0) {
     basePlayers  = snap.players;
     replaySubset = allGames.filter(g => g.playedAt > snap.snapshotAt);
   } else {
@@ -260,10 +261,12 @@ function computeRecordMaps(players, games) {
 
   for (const p of players) {
     const pg = games.filter(g => g.winnerId === p.id || g.loserId === p.id);
+    if (pg.length === 0) continue;   // must have played at least one game to hold a record
+
     track('mostGamesPlayed', p.wins + p.losses, p.id);
     track('mostGamesWon',    p.wins,             p.id);
 
-    let high = 1000;
+    let high = 0;
     pg.forEach(g => {
       const r = g.winnerId === p.id ? g.winnerRatingAfter : g.loserRatingAfter;
       if (r > high) high = r;
@@ -308,6 +311,16 @@ function computeRecordMaps(players, games) {
   return { recVals, recHolders };
 }
 
+// Return the player ID who holds the current biggest upset, or null if none.
+function computeBiggestUpsetHolder(games) {
+  let best = 0, holderId = null;
+  for (const g of games) {
+    const diff = g.loserRatingBefore - g.winnerRatingBefore;
+    if (diff > best) { best = diff; holderId = g.winnerId; }
+  }
+  return holderId;
+}
+
 function computeBadges(player, playerGames, allPlayers, allGames) {
   const earned = new Set();
   const played = player.wins + player.losses;
@@ -334,7 +347,8 @@ function computeBadges(player, playerGames, allPlayers, allGames) {
   });
 
   const { recHolders } = computeRecordMaps(allPlayers, allGames);
-  const holdsAny = Object.values(recHolders).some(s => s.has(player.id));
+  const holdsAny = Object.values(recHolders).some(s => s.has(player.id))
+                || computeBiggestUpsetHolder(allGames) === player.id;
   const holdsAll = Object.values(recHolders).every(s => s.size === 1 && s.has(player.id));
   if (holdsAny) earned.add('achieve_record');
   if (holdsAll) earned.add('all_records');
@@ -531,12 +545,14 @@ app.get('/api/records', (req, res) => {
 
   for (const player of players) {
     const pg     = games.filter(g => g.winnerId === player.id || g.loserId === player.id);
+    if (pg.length === 0) continue;   // must have played at least one game to hold a record
+
     const played = player.wins + player.losses;
 
     addHolder(records.mostGamesPlayed, played,       player);
     addHolder(records.mostGamesWon,    player.wins,  player);
 
-    let high = 1000;
+    let high = 0;
     pg.forEach(g => {
       const r = g.winnerId === player.id ? g.winnerRatingAfter : g.loserRatingAfter;
       if (r > high) high = r;
