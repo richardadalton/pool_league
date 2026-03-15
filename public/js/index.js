@@ -304,7 +304,7 @@ function renderAuthNav(user) {
   const nav = document.getElementById('auth-nav');
   if (user) {
     nav.innerHTML = `
-      <span class="auth-user">👤 ${esc(user.name)}</span>
+      <a class="auth-user auth-user-link" href="/user.html?id=${esc(user.id)}">👤 ${esc(user.name)}</a>
       <button class="btn btn-sm btn-ghost" onclick="logout()">Sign Out</button>`;
   } else {
     nav.innerHTML = `

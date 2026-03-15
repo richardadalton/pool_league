@@ -31,6 +31,7 @@ A focused, production-ready web application with a thoughtful architecture can b
 ## Features
 
 - **User accounts** — register and sign in to join leagues, record games, and claim your player profile. Guest players (added without an account) can be claimed later by signing in and clicking "This is me" on their profile page.
+- **User profile page** — clicking your username in the top-right nav opens your personal profile page showing your avatar, display name, sign-up date, and a card for every league you're in. Each league card shows your ranking, ELO rating, W/L record, win%, current streak, form guide, and earned badges. Clicking a league card navigates directly to that league.
 - **Multiple leagues** — each league has its own separate data file; switch between leagues from the home page. Signed-in users can create new leagues via the **＋ New** button.
 - **Join a league** — signed-in users who aren't yet in a league see a **Join League** banner and can join with one click, automatically creating their player entry.
 - **ELO rating system** — ratings update automatically after every game
@@ -196,17 +197,20 @@ pool_league/
     ├── login.html         # Sign-in page
     ├── register.html      # Registration page
     ├── player.html        # Individual player profile page
+    ├── user.html          # User profile page (cross-league stats)
     ├── records.html       # All-time records page
     ├── css/
     │   ├── main.css
     │   ├── auth.css       # Login/register page styles
     │   ├── index.css
     │   ├── player.css
+    │   ├── user.css       # User profile page styles
     │   └── records.css
     └── js/
-        ├── auth.js        # Shared auth nav (used by player.html, records.html)
+        ├── auth.js        # Shared auth nav (used by player.html, records.html, user.html)
         ├── index.js       # Frontend logic for main page
         ├── player.js      # Frontend logic for player profile
+        ├── user.js        # Frontend logic for user profile
         └── records.js     # Frontend logic for records page
 ```
 
@@ -234,13 +238,13 @@ npm run test:ui
 npm run test:report
 ```
 
-### What's covered (165 tests)
+### What's covered (191 tests)
 
 | Suite | Tests | Covers |
 |-------|-------|--------|
-| `api.spec.js` | 83 | Leagues, Players (incl. currentStreak), Games, Delete Game, Profile (incl. rivals, nemeses, tie-breaking), Records (incl. no-games eligibility), ELO maths, King of the Hill, Badges (incl. dynamic Record Holder, upset winner eligibility), Form guide, Biggest Upset, Active Streak, Avatars, Snapshot safety |
+| `api.spec.js` | 108 | Leagues, Players (incl. currentStreak), Games, Delete Game, Profile (incl. rivals, nemeses, tie-breaking), Records (incl. no-games eligibility), ELO maths, King of the Hill, Badges (incl. dynamic Record Holder, upset winner eligibility), Form guide, Biggest Upset, Active Streak, Avatars, Snapshot safety, Auth, Join League & Claim Player, User-scoped Avatar, **User Profile** |
 | `home.spec.js` | 34 | League table (incl. avatar column, streak column), Form guide, Add player, Record game, Game history, Delete game UI, League switcher |
-| `player.spec.js` | 28 | Hero section (incl. avatar), Stats grid, Badges, Streaks, Results history, ELO chart, Rival & Nemesis cards, 404 |
+| `player.spec.js` | 29 | Hero section (incl. avatar), Stats grid, Badges, Streaks, Results history, Rival & Nemesis cards, Claim Player, 404 |
 | `records.spec.js` | 20 | Layout, All 7 record cards, Holder links, Biggest Upset, Active Streak, Empty state |
 
 ---
@@ -256,6 +260,8 @@ All game/player routes accept a `?league=` query parameter (defaults to `pool`).
 | `POST` | `/api/auth/logout` | Sign out (destroys session) |
 | `GET` | `/api/auth/me` | Get the currently signed-in user |
 | `GET` | `/api/auth/memberships` | Map of `{ leagueSlug: playerId }` for the signed-in user |
+| `GET` | `/api/users/:id/profile` | Get a user's profile — avatar, name, sign-up date, and stats for every league they're in |
+| `GET` | `/api/users/:id/avatar` | Get a user's avatar (JPEG if uploaded, SVG initials otherwise) |
 | `GET` | `/api/leagues` | List all leagues |
 | `POST` | `/api/leagues` | Create a new league `{ name }` |
 | `POST` | `/api/leagues/:league/join` | Signed-in user joins a league (creates their player) |

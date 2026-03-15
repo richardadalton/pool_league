@@ -985,6 +985,83 @@ app.delete('/api/games/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// ── User profile ──────────────────────────────────────────────────────────────
+
+// GET /api/users/:id/profile — public user profile with cross-league stats
+app.get('/api/users/:id/profile', (req, res) => {
+  const users = readUsers();
+  const user  = users.find(u => u.id === req.params.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+
+  const leagues = getLeagues();
+  const leagueStats = [];
+
+  for (const league of leagues) {
+    const { players, games } = getCache(league);
+    const player = players.find(p => p.userId === user.id);
+    if (!player) continue;
+
+    const playerGames = games.filter(g => g.winnerId === player.id || g.loserId === player.id);
+    const sorted      = [...players].sort((a, b) => b.rating - a.rating);
+    const position    = sorted.findIndex(p => p.id === player.id) + 1;
+    const total       = player.wins + player.losses;
+    const form        = playerGames.slice(-5).map(g => g.winnerId === player.id ? 'W' : 'L');
+    const { currentStreak } = computePlayerStreaks(player.id, playerGames);
+    const { recHolders }    = computeRecordMaps(players, games);
+    const badges            = computeBadges(player, playerGames, players, games, recHolders);
+
+    leagueStats.push({
+      league,
+      playerId:  player.id,
+      position,
+      totalPlayers: players.length,
+      rating:    player.rating,
+      wins:      player.wins,
+      losses:    player.losses,
+      played:    total,
+      winPct:    total ? Math.round((player.wins / total) * 100) : 0,
+      form,
+      currentStreak,
+      badges,
+    });
+  }
+
+  res.json({
+    id:        user.id,
+    name:      user.name,
+    createdAt: user.createdAt,
+    leagues:   leagueStats,
+  });
+});
+
+// GET /api/users/:id/avatar — serve user-level avatar or SVG initials fallback
+app.get('/api/users/:id/avatar', (req, res) => {
+  const users = readUsers();
+  const user  = users.find(u => u.id === req.params.id);
+  const file  = userAvatarPath(req.params.id);
+
+  if (fs.existsSync(file)) {
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Cache-Control', `public, max-age=${AVATAR_CACHE_SECS}`);
+    return fs.createReadStream(file).pipe(res);
+  }
+
+  const initials = user
+    ? user.name.trim().split(/\s+/).map(w => w[0].toUpperCase()).slice(0, 2).join('')
+    : '?';
+  const colourKey = req.params.id;
+  const colours = ['#16a34a','#0d9488','#2563eb','#7c3aed','#c2410c','#b45309'];
+  const colour  = colours[colourKey.charCodeAt(0) % colours.length];
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">
+    <circle cx="100" cy="100" r="100" fill="${colour}"/>
+    <text x="100" y="100" font-family="system-ui,sans-serif" font-size="80"
+          font-weight="700" fill="white" text-anchor="middle" dominant-baseline="central">${initials}</text>
+  </svg>`;
+  res.setHeader('Content-Type', 'image/svg+xml');
+  res.setHeader('Cache-Control', 'no-store');
+  res.send(svg);
+});
+
 // ── Avatar routes ─────────────────────────────────────────────────────────────
 
 const upload = multer({

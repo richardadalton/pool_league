@@ -41,3 +41,11 @@ body {
   font-size: 0.9rem;
 }
 
+.auth-user-link {
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+.auth-user-link:hover { color: var(--accent); }
+

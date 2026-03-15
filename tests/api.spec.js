@@ -1225,3 +1225,123 @@ test.describe('User-scoped Avatar', () => {
   });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// User Profile API
+// ─────────────────────────────────────────────────────────────────────────────
+
+test.describe('User Profile API', () => {
+  let userId, leagueA, leagueB, playerA;
+
+  test.beforeAll(async ({ request }) => {
+    const creds = await registerAndLogin(request, '_userprofile');
+
+    // Fetch the user id from /api/auth/me
+    const me = await (await request.get(`${BASE}/api/auth/me`)).json();
+    userId = me.id;
+
+    // Join two leagues so the profile has multi-league stats
+    leagueA = await createTestLeague(request, '_upA');
+    leagueB = await createTestLeague(request, '_upB');
+
+    const joinA = await request.post(`${BASE}/api/leagues/${leagueA}/join`, {
+      data: {}, headers: { 'Content-Type': 'application/json' },
+    });
+    playerA = await joinA.json();
+
+    await request.post(`${BASE}/api/leagues/${leagueB}/join`, {
+      data: {}, headers: { 'Content-Type': 'application/json' },
+    });
+
+    // Add a second player in leagueA and record a game so stats are non-trivial
+    const opponent = await (await request.post(`${BASE}/api/players?league=${leagueA}`, {
+      data: { name: 'Opponent' }, headers: { 'Content-Type': 'application/json' },
+    })).json();
+    await request.post(`${BASE}/api/games?league=${leagueA}`, {
+      data: { winnerId: playerA.id, loserId: opponent.id },
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+
+  test('GET /api/users/:id/profile returns 200 with correct shape', async ({ request }) => {
+    const res = await request.get(`${BASE}/api/users/${userId}/profile`);
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body).toHaveProperty('id', userId);
+    expect(body).toHaveProperty('name');
+    expect(body).toHaveProperty('createdAt');
+    expect(Array.isArray(body.leagues)).toBe(true);
+  });
+
+  test('GET /api/users/:id/profile returns 404 for unknown user', async ({ request }) => {
+    const res = await request.get(`${BASE}/api/users/usr_doesnotexist_xyz/profile`);
+    expect(res.status()).toBe(404);
+  });
+
+  test('user profile lists all joined leagues', async ({ request }) => {
+    const body = await (await request.get(`${BASE}/api/users/${userId}/profile`)).json();
+    const slugs = body.leagues.map(l => l.league);
+    expect(slugs).toContain(leagueA);
+    expect(slugs).toContain(leagueB);
+  });
+
+  test('each league entry has the required stat fields', async ({ request }) => {
+    const body = await (await request.get(`${BASE}/api/users/${userId}/profile`)).json();
+    const entry = body.leagues.find(l => l.league === leagueA);
+    expect(entry).toBeTruthy();
+    expect(typeof entry.position).toBe('number');
+    expect(typeof entry.totalPlayers).toBe('number');
+    expect(typeof entry.rating).toBe('number');
+    expect(typeof entry.wins).toBe('number');
+    expect(typeof entry.losses).toBe('number');
+    expect(typeof entry.played).toBe('number');
+    expect(typeof entry.winPct).toBe('number');
+    expect(Array.isArray(entry.form)).toBe(true);
+    expect(entry.currentStreak).toHaveProperty('type');
+    expect(entry.currentStreak).toHaveProperty('count');
+    expect(Array.isArray(entry.badges)).toBe(true);
+  });
+
+  test('league stats reflect recorded game (1 win, correct rating)', async ({ request }) => {
+    const body = await (await request.get(`${BASE}/api/users/${userId}/profile`)).json();
+    const entry = body.leagues.find(l => l.league === leagueA);
+    expect(entry.wins).toBe(1);
+    expect(entry.losses).toBe(0);
+    expect(entry.rating).toBeGreaterThan(1000);
+  });
+
+  test('form array in league entry contains W for the recorded win', async ({ request }) => {
+    const body = await (await request.get(`${BASE}/api/users/${userId}/profile`)).json();
+    const entry = body.leagues.find(l => l.league === leagueA);
+    expect(entry.form).toContain('W');
+  });
+
+  test('badges in league entry include earned first_win', async ({ request }) => {
+    const body = await (await request.get(`${BASE}/api/users/${userId}/profile`)).json();
+    const entry = body.leagues.find(l => l.league === leagueA);
+    const firstWin = entry.badges.find(b => b.id === 'first_win');
+    expect(firstWin).toBeTruthy();
+    expect(firstWin.earned).toBe(true);
+  });
+
+  test('GET /api/users/:id/avatar returns SVG initials for a user with no uploaded avatar', async ({ request }) => {
+    const res = await request.get(`${BASE}/api/users/${userId}/avatar`);
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain('svg');
+  });
+
+  test('GET /api/users/:id/avatar returns SVG fallback for unknown user id', async ({ request }) => {
+    const res = await request.get(`${BASE}/api/users/usr_unknown_xyz/avatar`);
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain('svg');
+  });
+
+  test('user not in any league has empty leagues array', async ({ request }) => {
+    // Register a fresh user who never joins a league
+    const creds = await registerAndLogin(request, '_noleagues');
+    const me = await (await request.get(`${BASE}/api/auth/me`)).json();
+    const body = await (await request.get(`${BASE}/api/users/${me.id}/profile`)).json();
+    expect(Array.isArray(body.leagues)).toBe(true);
+    expect(body.leagues.length).toBe(0);
+  });
+});
+

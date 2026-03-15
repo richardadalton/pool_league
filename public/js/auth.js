@@ -17,7 +17,7 @@ async function renderAuthNav() {
     if (res.ok) {
       const user = await res.json();
       nav.innerHTML = `
-        <span class="auth-user">👤 ${esc(user.name)}</span>
+        <a class="auth-user auth-user-link" href="/user.html?id=${esc(user.id)}">👤 ${esc(user.name)}</a>
         <button class="btn btn-sm btn-ghost" onclick="authLogout()">Sign Out</button>`;
     } else {
       nav.innerHTML = `

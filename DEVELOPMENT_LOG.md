@@ -979,15 +979,18 @@ pool_league/
 └── public/
     ├── index.html         # League table, record game, league switcher
     ├── player.html        # Individual player profile
+    ├── user.html          # User profile (cross-league stats)
     ├── records.html       # All-time records page
     ├── css/
-    │   ├── main.css       # Shared styles
+    │   ├── main.css       # Shared styles (incl. auth-user-link)
     │   ├── index.css
     │   ├── player.css
+    │   ├── user.css       # User profile page styles
     │   └── records.css
     └── js/
         ├── index.js       # Home page logic
         ├── player.js      # Profile page logic
+        ├── user.js        # User profile page logic
         └── records.js     # Records page logic
 ```
 
@@ -1238,6 +1241,102 @@ If the deleted game predates all snapshots, all snapshots are cleared and a full
 
 ---
 
+### 36. User Profile Page
+
+#### Feature description
+
+A dedicated **user profile page** (`/user.html?id=<userId>`) was added so signed-in users can view their cross-league identity and stats in one place. The page is reached by clicking the username link in the top-right auth nav on any page.
+
+#### What the page shows
+
+| Section | Content |
+|---------|---------|
+| **Hero** | Avatar (same image as used in league tables), display name, sign-up date, league count |
+| **League cards** | One card per league the user is in — ranking, ELO rating, W, L, Win%, current streak, form guide (last 5), earned badge emojis with tooltips |
+| **Navigation** | Clicking a league card goes directly to that league's home page |
+
+#### Backend — two new routes
+
+**`GET /api/users/:id/profile`**
+
+Returns the user's public data and a `leagues` array. Each entry is computed fresh from the league cache:
+
+```json
+{
+  "id": "usr_...",
+  "name": "Richard",
+  "createdAt": "...",
+  "leagues": [
+    {
+      "league": "pool",
+      "playerId": "...",
+      "position": 1,
+      "totalPlayers": 4,
+      "rating": 1048,
+      "wins": 7,
+      "losses": 3,
+      "played": 10,
+      "winPct": 70,
+      "form": ["W","W","L","W","W"],
+      "currentStreak": { "type": "W", "count": 2 },
+      "badges": [ ... ]
+    }
+  ]
+}
+```
+
+Returns 404 if the user ID is not found. Returns an empty `leagues` array for a user who hasn't joined any league yet.
+
+**`GET /api/users/:id/avatar`**
+
+Serves `data/avatars/<userId>.jpg` if it exists, or falls back to the same SVG initials generator used elsewhere (colour derived from `userId`). Always returns 200 — no 404 for missing avatars.
+
+#### Frontend — new files
+
+| File | Purpose |
+|------|---------|
+| `public/user.html` | Page shell — topbar, back link, auth nav, `#root` container |
+| `public/js/user.js` | Fetches `/api/users/:id/profile`, renders hero + league cards |
+| `public/css/user.css` | Styles for hero, league card, stats row, form squares, streak pills, badge row |
+
+#### Auth nav — username is now a link
+
+Previously the signed-in username displayed as a plain `<span>`. It is now an `<a>` tag linking to `/user.html?id=<userId>`:
+
+- Updated in `public/js/auth.js` (used by `player.html`, `records.html`)
+- Updated in `public/js/index.js` (home page's own `renderAuthNav`)
+- `.auth-user-link` style added to `public/css/main.css` so the link looks consistent (muted colour, accent on hover) across all pages
+
+#### Tests added (10 new — `api.spec.js`)
+
+A new `User Profile API` describe block was added immediately after the existing `User-scoped Avatar` block:
+
+| Test | What it verifies |
+|------|-----------------|
+| `GET /api/users/:id/profile` returns 200 with correct shape | `id`, `name`, `createdAt`, `leagues` array present |
+| Returns 404 for unknown user | Unknown user ID rejected correctly |
+| User profile lists all joined leagues | Both `leagueA` and `leagueB` slugs appear in the array |
+| Each league entry has the required stat fields | All of: `position`, `totalPlayers`, `rating`, `wins`, `losses`, `played`, `winPct`, `form`, `currentStreak`, `badges` |
+| League stats reflect recorded game | 1 win, rating > 1000 after one win |
+| Form array contains W for the recorded win | `form` includes `'W'` |
+| Badges include earned `first_win` | Badge present and `earned: true` |
+| `GET /api/users/:id/avatar` returns SVG for user with no uploaded avatar | Content-Type is `svg` |
+| `GET /api/users/:id/avatar` returns SVG fallback for unknown user id | Always returns 200 |
+| User not in any league has empty `leagues` array | Fresh user, no leagues joined |
+
+**Total tests: 165 → 175.**
+
+#### API reference additions
+
+Two new routes added to the API reference:
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/users/:id/profile` | User profile — name, sign-up date, cross-league stats |
+| `GET` | `/api/users/:id/avatar` | User avatar (JPEG or SVG initials fallback) |
+
+---
+
 ## API Reference
 
 All routes accept a `?league=` query parameter (defaults to `pool`).
@@ -1249,6 +1348,8 @@ All routes accept a `?league=` query parameter (defaults to `pool`).
 | `POST` | `/api/auth/logout` | Sign out (destroys session) |
 | `GET` | `/api/auth/me` | Get the currently signed-in user |
 | `GET` | `/api/auth/memberships` | Map of `{ leagueSlug: playerId }` for the signed-in user |
+| `GET` | `/api/users/:id/profile` | User profile — name, sign-up date, cross-league stats |
+| `GET` | `/api/users/:id/avatar` | User avatar (JPEG or SVG initials fallback) |
 | `GET` | `/api/leagues` | List all leagues |
 | `POST` | `/api/leagues` | Create a new league `{ name }` |
 | `POST` | `/api/leagues/:league/join` | Signed-in user joins a league (creates their player) |
